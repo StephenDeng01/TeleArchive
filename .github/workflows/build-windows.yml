@@ -65,12 +65,14 @@ jobs:
           export VERSION="${GITHUB_REF_NAME#v}"
           export TAG="${GITHUB_REF_NAME}"
           python - <<'PY'
-          import json, os
+          import json, os, re
           from pathlib import Path
           version = os.environ["VERSION"].removeprefix("v")
           tag = os.environ["TAG"]
           owner, repo = "StephenDeng01", "TeleArchive"
           sha = Path("dist/TeleArchive.exe.sha256").read_text(encoding="utf-8").strip().lower()
+          if not re.fullmatch(r"[0-9a-f]{64}", sha):
+              raise SystemExit(f"invalid sha256 in dist/TeleArchive.exe.sha256: {sha!r}")
           doc = {
               "version": version,
               "tag": tag,
@@ -88,12 +90,13 @@ jobs:
       - name: Push version.json to main
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
+          cp version.json /tmp/telearchive-version.json
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch origin main
           git checkout main
           git pull origin main
-          git checkout ${{ github.ref_name }} -- version.json
+          cp /tmp/telearchive-version.json version.json
           git add version.json
           git diff --staged --quiet || git commit -m "chore: update version.json for ${{ github.ref_name }}"
           git push origin main

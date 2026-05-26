@@ -1,9 +1,9 @@
 {
-  "version": "0.6.2",
-  "tag": "v0.6.2",
-  "title": "TeleArchive v0.6.2",
-  "release_url": "https://github.com/StephenDeng01/TeleArchive/releases/tag/v0.6.2",
-  "download_url": "https://github.com/StephenDeng01/TeleArchive/releases/download/v0.6.2/TeleArchive.exe",
+  "version": "0.6.3",
+  "tag": "v0.6.3",
+  "title": "TeleArchive v0.6.3",
+  "release_url": "https://github.com/StephenDeng01/TeleArchive/releases/tag/v0.6.3",
+  "download_url": "https://github.com/StephenDeng01/TeleArchive/releases/download/v0.6.3/TeleArchive.exe",
   "sha256": "",
-  "notes": "右侧看板改用 Telegram Desktop 原生 HTML/CSS 样式渲染。"
+  "notes": "修复 version.json 的 sha256 被 CI 覆盖为空；立即更新前自动从 Release 旁路获取 sha256。"
 }

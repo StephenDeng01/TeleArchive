@@ -12,7 +12,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -129,7 +129,9 @@ def _try_fetch_sha256_sidecar(download_url: str, *, timeout: float) -> str | Non
     else:
         candidates.append(download_url + ".sha256")
 
-    for url in candidates:
+    ts = int(time.time())
+    for base in candidates:
+        url = f"{base}?ts={ts}"
         try:
             raw = _http_get_text(url, timeout=timeout).strip()
         except (urllib.error.URLError, TimeoutError, ValueError, urllib.error.HTTPError):
@@ -141,6 +143,18 @@ def _try_fetch_sha256_sidecar(download_url: str, *, timeout: float) -> str | Non
         if m:
             return m.group(1).lower()
     return None
+
+
+def resolve_release_sha256(release: ReleaseInfo, *, timeout: float = 20.0) -> ReleaseInfo:
+    """Fill missing sha256 from Release sidecar asset when manifest is stale."""
+    if release.sha256:
+        return release
+    if not release.download_url:
+        return release
+    sha = _try_fetch_sha256_sidecar(release.download_url, timeout=timeout)
+    if sha:
+        return replace(release, sha256=sha)
+    return release
 
 
 def _parse_github_http_error(exc: urllib.error.HTTPError) -> str:
@@ -293,6 +307,7 @@ def check_for_update(timeout: float = 8.0) -> UpdateCheckResult:
     if compare_versions(latest.version, current) <= 0:
         return UpdateCheckResult(current_version=current, latest=None)
 
+    latest = resolve_release_sha256(latest, timeout=timeout)
     return UpdateCheckResult(current_version=current, latest=latest)
 
 
@@ -345,8 +360,12 @@ def perform_in_app_update(release: ReleaseInfo) -> None:
         raise RuntimeError("当前为源码运行模式，无法自替换可执行文件。")
     if not release.download_url:
         raise RuntimeError("该版本未提供下载地址。")
+    release = resolve_release_sha256(release, timeout=30.0)
     if not release.sha256:
-        raise RuntimeError("该版本未提供 sha256，已阻止自动更新以保证安全。")
+        raise RuntimeError(
+            "该版本未提供 sha256，已阻止自动更新以保证安全。"
+            "请稍后重试，或从 Releases 页面手动下载安装。"
+        )
 
     current_exe = Path(sys.executable).resolve()
     staging_dir = Path(tempfile.gettempdir()) / "telearchive-update"
