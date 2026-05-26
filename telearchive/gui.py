@@ -13,6 +13,13 @@ from telearchive import __version__
 from telearchive.coverage import export_coverage, find_id_gaps
 from telearchive.db import Database
 from telearchive.merge import ingest_paths
+from telearchive.notify import notify_update_available
+from telearchive.update_dialog import UpdateDialog
+from telearchive.updater import (
+    UpdateCheckResult,
+    check_for_update,
+    should_notify_update,
+)
 
 
 DEFAULT_DB = Path("data/telearchive.db")
@@ -38,6 +45,7 @@ class TeleArchiveApp(tk.Tk):
         self._build_ui()
         self._log("欢迎使用 TeleArchive。请选择 Telegram 导出文件夹，然后点击「导入合并」。")
         self._log("提示：每次导出的完整文件夹（含 result.json 与 photos/ 等）均可添加。")
+        self.after(800, self._check_update_on_startup)
 
     def _build_ui(self) -> None:
         pad = {"padx": 10, "pady": 6}
@@ -104,6 +112,8 @@ class TeleArchiveApp(tk.Tk):
         self.btn_status.pack(side=tk.LEFT, padx=(8, 0))
         self.btn_gaps = ttk.Button(action_row, text="缺口分析", command=self._show_gaps)
         self.btn_gaps.pack(side=tk.LEFT, padx=(8, 0))
+        self.btn_update = ttk.Button(action_row, text="检查更新", command=self._check_update_manual)
+        self.btn_update.pack(side=tk.RIGHT)
 
         try:
             style = ttk.Style()
@@ -135,7 +145,13 @@ class TeleArchiveApp(tk.Tk):
     def _set_busy(self, busy: bool, text: str) -> None:
         self._busy = busy
         state = tk.DISABLED if busy else tk.NORMAL
-        for widget in (self.btn_init, self.btn_ingest, self.btn_status, self.btn_gaps):
+        for widget in (
+            self.btn_init,
+            self.btn_ingest,
+            self.btn_status,
+            self.btn_gaps,
+            self.btn_update,
+        ):
             widget.configure(state=state)
         self.status.configure(text=text)
         self.configure(cursor="watch" if busy else "")
@@ -330,6 +346,49 @@ class TeleArchiveApp(tk.Tk):
             self.after(0, lambda: self._log("\n".join(lines)))
 
         self._run_async("正在分析…", worker)
+
+    def _check_update_on_startup(self) -> None:
+        def worker() -> None:
+            result = check_for_update()
+            if should_notify_update(result):
+                self.after(0, lambda: self._present_update(result, quiet=True))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _check_update_manual(self) -> None:
+        def worker() -> None:
+            result = check_for_update()
+            self.after(0, lambda: self._handle_manual_update_result(result))
+
+        self._run_async("正在检查更新…", worker)
+
+    def _handle_manual_update_result(self, result: UpdateCheckResult) -> None:
+        if result.error:
+            messagebox.showwarning("检查更新", result.error)
+            return
+        if not result.has_update:
+            messagebox.showinfo(
+                "检查更新",
+                f"当前已是最新版本（v{result.current_version}）。",
+            )
+            return
+        self._present_update(result, quiet=False)
+
+    def _present_update(self, result: UpdateCheckResult, *, quiet: bool) -> None:
+        if not result.latest:
+            return
+        if quiet:
+            notify_update_available(
+                "TeleArchive 更新",
+                f"新版本 v{result.latest.version} 已发布，点击查看。",
+            )
+            self._log(f"发现新版本 v{result.latest.version}，已弹出更新提醒。")
+        UpdateDialog(
+            self,
+            result.latest,
+            result.current_version,
+            on_later=lambda: None,
+        )
 
 
 def should_launch_gui(argv: list[str] | None = None) -> bool:

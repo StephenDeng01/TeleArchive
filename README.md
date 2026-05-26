@@ -56,6 +56,7 @@ TeleArchive 面向 **无法使用 Telegram Bot / 官方 API**，但仍需长期�
 - 📎 **媒体感知** — 解析 JSON 相对路径，校验文件存在，按内容哈希关联跨批次附件
 - 🧭 **批次可追溯** — 记录每条消息的首次来源导出与导入历史
 - 🕳️ **缺口分析** — `gaps` 命令识别 message ID 序列空洞，辅助判断删消息区间
+- 🔔 **更新提醒** — 启动时检查 GitHub 新版本，可选更新、可「不再提示此版本」
 - 📥 **开箱即用** — Windows 提供图形界面，双击即可使用；亦支持命令行与 pip 安装
 
 ---
@@ -187,8 +188,24 @@ SELECT preferred_absolute_path FROM message_media WHERE ...;
 | `telearchive status` | 📊 查看群聊消息统计、媒体索引与导入历史 |
 | `telearchive gaps` | 🕳️ 分析 message ID 序列空洞与各批次覆盖情况 |
 | `telearchive version` | ℹ️ 显示当前版本 |
+| `telearchive check-update` | 🔔 检查是否有新版本（仅提醒） |
 
 全局选项：`--db <路径>` 指定数据库文件（默认 `data/telearchive.db`）。
+
+### 🔔 更新提醒
+
+- 启动图形界面后，会自动检查 [GitHub Releases](https://github.com/StephenDeng01/TeleArchive/releases) 是否有新版本
+- **不强制更新**：可继续使用当前版本
+- **稍后提醒**：关闭对话框，下次启动仍会提示
+- **不再提示此版本**：仅忽略当前最新版；发布更新的版本后会再次提醒
+- 偏好保存在 `data/settings.json`
+
+命令行手动检查：
+
+```bash
+telearchive check-update
+telearchive check-update --dismiss 0.3.0   # 不再提示指定版本
+```
 
 ---
 
@@ -269,6 +286,7 @@ df = pd.read_sql("SELECT * FROM messages WHERE chat_id = ?", conn, params=(chat_
 2. **导入合并** — 一键合并去重，结果写入数据库
 3. **查看状态** — 消息总数、媒体索引、导入历史
 4. **缺口分析** — 查看因自动删消息造成的 ID 空洞
+5. **检查更新** — 查看是否有新版本（可选提醒，不强制更新）
 
 数据库路径可在界面顶部修改（默认 `data\telearchive.db`）。
 

@@ -14,6 +14,7 @@ from telearchive import __version__
 from telearchive.coverage import export_coverage, find_id_gaps
 from telearchive.db import Database
 from telearchive.merge import ingest_paths
+from telearchive.updater import check_for_update, dismiss_update_reminder
 
 app = typer.Typer(
     name="telearchive",
@@ -33,6 +34,43 @@ def _resolve_db(db: Optional[Path]) -> Path:
 def version() -> None:
     """显示版本号。"""
     console.print(f"telearchive {__version__}")
+
+
+@app.command("check-update")
+def check_update_cmd(
+    dismiss: Optional[str] = typer.Option(
+        None,
+        "--dismiss",
+        help="不再提示该版本更新（例如 --dismiss 0.3.0）",
+    ),
+) -> None:
+    """检查 GitHub 是否有新版本（仅提醒，不强制更新）。"""
+    if dismiss:
+        dismiss_update_reminder(dismiss.lstrip("vV"))
+        console.print(f"[green]已设置：不再提示 v{dismiss.lstrip('vV')} 更新[/green]")
+        return
+
+    result = check_for_update()
+    if result.error:
+        console.print(f"[yellow]检查失败[/yellow]: {result.error}")
+        raise typer.Exit(1)
+    if not result.has_update:
+        console.print(f"[green]当前已是最新版本[/green]（v{result.current_version}）")
+        return
+    latest = result.latest
+    assert latest is not None
+    if result.is_dismissed:
+        console.print(
+            f"有新版本 v{latest.version}，但您已选择不再提示此版本。"
+        )
+        console.print(f"下载: {latest.url}")
+        return
+    console.print(
+        f"[cyan]发现新版本[/cyan]: v{result.current_version} → v{latest.version}"
+    )
+    console.print(f"下载: {latest.url}")
+    if latest.notes:
+        console.print("\n更新说明:\n" + latest.notes[:500])
 
 
 @app.command()
