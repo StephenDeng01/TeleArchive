@@ -36,7 +36,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install ".[build]"
           pyinstaller --noconfirm --clean telearchive.spec
-          certutil -hashfile dist\TeleArchive.exe SHA256 | findstr /R /C:"^[0-9A-F][0-9A-F]" > dist\TeleArchive.exe.sha256
+          powershell -NoProfile -Command "$h=(Get-FileHash -Algorithm SHA256 dist\\TeleArchive.exe).Hash.ToLower(); Set-Content -NoNewline -Encoding ascii dist\\TeleArchive.exe.sha256 $h"
           dir dist
 
       - name: Upload artifact
