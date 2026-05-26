@@ -37,6 +37,7 @@ hiddenimports = (
     "telearchive.html_board",
     "telearchive.board_browser",
     "telearchive.board_embed",
+    "telearchive.webview2_runtime",
 ]
 )
 

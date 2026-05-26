@@ -24,3 +24,6 @@ data/
 ChatExport*/
 Telegram Desktop*/
 /messages.html
+WebView2Runtime/
+WebView2Data/
+_webview2_staging/

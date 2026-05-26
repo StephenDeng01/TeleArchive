@@ -16,7 +16,12 @@ from telearchive.db import Database
 from telearchive.export_chat import export_chat_range
 from telearchive.export_dates import default_datetime_bounds, set_shortcut_range
 from telearchive.board_browser import show_board_html
-from telearchive.board_embed import EmbeddedBoardFrame, is_embed_supported
+from telearchive.board_embed import EmbeddedBoardFrame, is_embed_platform, is_embed_supported
+from telearchive.webview2_runtime import (
+    bootstrap_portable_runtime,
+    is_runtime_ready,
+    runtime_status_message,
+)
 from telearchive.html_board import (
     BoardRenderResult,
     render_range_to_cache,
@@ -274,9 +279,21 @@ class TeleArchiveApp(tk.Tk):
 
         board_view_host = ttk.Frame(board_frame)
         board_view_host.pack(fill=tk.BOTH, expand=True, pady=(0, 6))
-        if is_embed_supported():
-            self._board_embed = EmbeddedBoardFrame(board_view_host)
-            self._board_embed.pack(fill=tk.BOTH, expand=True)
+        if is_embed_platform():
+            if is_runtime_ready():
+                self._board_embed = EmbeddedBoardFrame(board_view_host)
+                self._board_embed.pack(fill=tk.BOTH, expand=True)
+            else:
+                self._board_embed = None
+                hint = scrolledtext.ScrolledText(
+                    board_view_host,
+                    height=12,
+                    font=("Segoe UI", 10),
+                    wrap=tk.WORD,
+                )
+                hint.pack(fill=tk.BOTH, expand=True)
+                hint.insert(tk.END, runtime_status_message() + "\n")
+                hint.configure(state=tk.DISABLED)
         else:
             self._board_embed = None
             fallback = scrolledtext.ScrolledText(
@@ -296,12 +313,19 @@ class TeleArchiveApp(tk.Tk):
 
         board_btn_row = ttk.Frame(board_frame)
         board_btn_row.pack(fill=tk.X)
+        if is_embed_platform():
+            self.btn_install_webview2 = ttk.Button(
+                board_btn_row,
+                text="安装便携 WebView2",
+                command=self._install_portable_webview2,
+            )
+            self.btn_install_webview2.pack(side=tk.LEFT)
         self.btn_board_open = ttk.Button(
             board_btn_row,
             text="在系统浏览器中打开",
             command=self._open_board_in_browser,
         )
-        self.btn_board_open.pack(side=tk.LEFT)
+        self.btn_board_open.pack(side=tk.LEFT, padx=(8, 0))
         ttk.Button(
             board_btn_row,
             text="打开缓存目录",
@@ -331,6 +355,7 @@ class TeleArchiveApp(tk.Tk):
             self.btn_export,
             self.btn_board_refresh,
             self.btn_board_open,
+            getattr(self, "btn_install_webview2", self.btn_board_open),
             self.btn_board_close,
             self.btn_today,
             self.btn_3d,
@@ -639,7 +664,35 @@ class TeleArchiveApp(tk.Tk):
             raise ValueError("数据库中有多个群聊，请填写群聊ID。")
         return chats[0].chat_id
 
+    def _install_portable_webview2(self) -> None:
+        if not is_embed_platform():
+            return
+
+        def worker() -> None:
+            try:
+                bootstrap_portable_runtime(progress=lambda m: self.after(0, lambda: self._log(m)))
+            except OSError as exc:
+                self.after(0, lambda: messagebox.showerror("安装失败", str(exc)))
+                return
+            self.after(
+                0,
+                lambda: messagebox.showinfo(
+                    "安装完成",
+                    "便携 WebView2 已安装到程序目录（与 exe 同级）。\n"
+                    "请重启应用后点击「刷新预览」。",
+                ),
+            )
+
+        self._run_async("正在安装便携 WebView2…", worker)
+
     def _render_board(self) -> None:
+        if is_embed_platform() and not is_runtime_ready() and self._board_embed is None:
+            messagebox.showinfo(
+                "需要 WebView2",
+                "请先点击「安装便携 WebView2」，或使用带 WebView2Runtime 文件夹的完整安装包。",
+            )
+            return
+
         def worker() -> None:
             db_path = Path(self.db_path.get())
             if not db_path.is_file():

@@ -9,6 +9,8 @@ from ctypes import wintypes
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from telearchive.webview2_runtime import configure_portable_webview2, is_runtime_ready
+
 if TYPE_CHECKING:
     import tkinter as tk
 
@@ -45,6 +47,10 @@ _WEBVIEW_LOCK = threading.Lock()
 
 
 def is_embed_supported() -> bool:
+    return sys.platform == "win32" and is_runtime_ready()
+
+
+def is_embed_platform() -> bool:
     return sys.platform == "win32"
 
 
@@ -78,6 +84,12 @@ def _ensure_webview_loop(*, title: str, width: int, height: int) -> None:
             return
 
         import webview
+
+        if not configure_portable_webview2():
+            raise RuntimeError(
+                "未找到便携 WebView2。请使用含 WebView2Runtime 的完整包，"
+                "或点击「安装便携 WebView2」。"
+            )
 
         _WEBVIEW_READY.clear()
         _WEBVIEW_TITLE = title
