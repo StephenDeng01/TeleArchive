@@ -1,9 +1,9 @@
 {
-  "version": "0.6.6",
-  "tag": "v0.6.6",
-  "title": "TeleArchive v0.6.6",
-  "release_url": "https://github.com/StephenDeng01/TeleArchive/releases/tag/v0.6.6",
-  "download_url": "https://github.com/StephenDeng01/TeleArchive/releases/download/v0.6.6/TeleArchive.exe",
-  "sha256": "574e9819d1b5a63af41a3c4769692b840b3fd09578909902bcfd54b912ca794b",
+  "version": "0.6.7",
+  "tag": "v0.6.7",
+  "title": "TeleArchive v0.6.7",
+  "release_url": "https://github.com/StephenDeng01/TeleArchive/releases/tag/v0.6.7",
+  "download_url": "https://github.com/StephenDeng01/TeleArchive/releases/download/v0.6.7/TeleArchive.exe",
+  "sha256": "d5e9bf77ec647e151168b895f2eee0b0ced7be7c43644b9156c39e087a8d1424",
   "notes": "修复 Windows CI 推送 version.json 时使用 /tmp 导致失败的问题。"
 }
