@@ -1,9 +1,14 @@
 # -*- mode: python ; coding: utf-8 -*-
 """PyInstaller spec: pyinstaller telearchive.spec"""
 
-from PyInstaller.utils.hooks import collect_submodules
+from pathlib import Path
+
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+
+import telearchive
 
 block_cipher = None
+_tg_assets = Path(telearchive.__file__).resolve().parent / "assets" / "tg_export"
 
 hiddenimports = (
     collect_submodules("rich")
@@ -37,7 +42,11 @@ a = Analysis(
     ["telearchive/__main__.py"],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=collect_data_files("telearchive")
+    + [
+        (str(_tg_assets / "css"), "telearchive/assets/tg_export/css"),
+        (str(_tg_assets / "js"), "telearchive/assets/tg_export/js"),
+    ],
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},

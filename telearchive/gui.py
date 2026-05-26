@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 import sys
 import threading
 import tkinter as tk
@@ -616,12 +617,10 @@ class TeleArchiveApp(tk.Tk):
     def _close_board(self) -> None:
         if self._board_html is not None:
             self._board_html.load_html("<html><body></body></html>")
-        if self._board_loaded_file and self._board_loaded_file.is_file():
+        if self._board_loaded_file is not None:
+            bundle_dir = self._board_loaded_file.parent
             try:
-                self._board_loaded_file.unlink()
-                json_path = self._board_loaded_file.with_suffix(".json")
-                if json_path.is_file():
-                    json_path.unlink()
+                shutil.rmtree(bundle_dir, ignore_errors=True)
             except OSError:
                 pass
         self._board_loaded_file = None

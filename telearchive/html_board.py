@@ -1,10 +1,11 @@
-"""Build Telegram-like HTML previews for GUI board from merged DB messages."""
+"""Build Telegram Desktop-style HTML previews for GUI board from merged DB messages."""
 
 from __future__ import annotations
 
 import html
 import json
 import re
+import shutil
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -17,6 +18,20 @@ from telearchive.parser import extract_text
 UTC8 = timezone(timedelta(hours=8))
 ALL_FROM = "1970-01-01"
 ALL_TO = "2099-12-31"
+_MONTHS = (
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+)
 
 
 @dataclass
@@ -87,9 +102,9 @@ def render_range_to_cache(
 
     key = f"chat_{chat_id}_{from_ts}_{to_ts}"
     chat_dir = (cache_dir / f"chat_{chat_id}").resolve()
-    chat_dir.mkdir(parents=True, exist_ok=True)
-    json_path = chat_dir / f"{key}.json"
-    html_path = chat_dir / f"{key}.html"
+    bundle_dir = chat_dir / key
+    json_path = bundle_dir / "board_meta.json"
+    html_path = bundle_dir / "messages.html"
     if html_path.is_file() and json_path.is_file():
         count = _load_count(json_path)
         return BoardRenderResult(
@@ -117,10 +132,19 @@ def render_range_to_cache(
     if not messages:
         raise ValueError("该时间范围内没有可渲染消息")
 
+    if bundle_dir.exists():
+        shutil.rmtree(bundle_dir, ignore_errors=True)
+    bundle_dir.mkdir(parents=True, exist_ok=True)
+    _install_tg_assets(bundle_dir)
+
     message_ids = [int(m["id"]) for m in messages if m.get("id") is not None]
     media_map = db.fetch_media_sources(chat_id, message_ids)
-    html_text = _render_html(chat_name, messages, media_map)
-    html_path.write_text(html_text, encoding="utf-8")
+    _copy_media_files(bundle_dir, messages, media_map)
+
+    html_path.write_text(
+        _render_native_html(chat_name, messages, media_map),
+        encoding="utf-8",
+    )
     json_path.write_text(
         json.dumps(
             {
@@ -129,7 +153,6 @@ def render_range_to_cache(
                 "from_ts": from_ts,
                 "to_ts": to_ts,
                 "message_count": len(messages),
-                "messages": messages,
             },
             ensure_ascii=False,
             indent=1,
@@ -153,6 +176,45 @@ def warmup_all_messages_cache(db_path: Path, cache_dir: Path, chat_id: int) -> N
         render_range_to_cache(db, cache_dir, chat_id, ALL_FROM, ALL_TO)
 
 
+def _tg_assets_root() -> Path:
+    return Path(__file__).resolve().parent / "assets" / "tg_export"
+
+
+def _install_tg_assets(bundle_dir: Path) -> None:
+    src = _tg_assets_root()
+    for sub in ("css", "js"):
+        dest = bundle_dir / sub
+        if dest.exists():
+            shutil.rmtree(dest)
+        shutil.copytree(src / sub, dest)
+
+
+def _copy_media_files(
+    bundle_dir: Path,
+    messages: list[dict[str, Any]],
+    media_map: dict[tuple[int, str], str],
+) -> None:
+    seen: set[str] = set()
+    for msg in messages:
+        mid = msg.get("id")
+        if mid is None:
+            continue
+        for _kind, rel in extract_media_refs(msg):
+            if rel in seen:
+                continue
+            seen.add(rel)
+            src = media_map.get((int(mid), rel))
+            if not src:
+                continue
+            src_path = Path(src)
+            if not src_path.is_file():
+                continue
+            dest = bundle_dir / rel
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            if not dest.exists():
+                shutil.copy2(src_path, dest)
+
+
 def _load_count(path: Path) -> int:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -166,74 +228,268 @@ def _load_count(path: Path) -> int:
     return 0
 
 
-def _render_html(
+def _render_native_html(
     chat_name: str,
     messages: list[dict[str, Any]],
     media_map: dict[tuple[int, str], str],
 ) -> str:
-    parts: list[str] = [
-        "<!doctype html>",
-        "<html><head><meta charset='utf-8'>",
-        "<meta name='viewport' content='width=device-width, initial-scale=1'>",
-        f"<title>{html.escape(chat_name)}</title>",
-        "<style>",
-        "body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#17212b;color:#e6ebf0;margin:0}",
-        ".wrap{max-width:960px;margin:0 auto;padding:16px}",
-        ".header{position:sticky;top:0;background:#242f3d;padding:10px 14px;border-radius:10px;margin-bottom:12px}",
-        ".msg{background:#242f3d;border-radius:12px;padding:10px 12px;margin:8px 0}",
-        ".meta{font-size:12px;color:#8ca0b3;margin-bottom:6px;display:flex;gap:8px;flex-wrap:wrap}",
-        ".name{font-weight:600;color:#6ab0ff}",
-        ".txt{white-space:pre-wrap;line-height:1.45}",
-        ".media{margin-top:8px;display:flex;flex-direction:column;gap:6px}",
-        "img{max-width:100%;border-radius:8px}",
-        "video,audio{max-width:100%}",
-        "a{color:#66b3ff;text-decoration:none}",
-        "</style></head><body><div class='wrap'>",
-        f"<div class='header'><strong>{html.escape(chat_name)}</strong> · {len(messages)} 条消息</div>",
-    ]
+    title = html.escape(chat_name)
+    history = _render_history(messages, media_map)
+    return (
+        "<!DOCTYPE html>\n<html>\n <head>\n"
+        "  <meta charset=\"utf-8\"/>\n"
+        f"<title>{title}</title>\n"
+        "  <meta content=\"width=device-width, initial-scale=1.0\" name=\"viewport\"/>\n"
+        "  <link href=\"css/style.css\" rel=\"stylesheet\"/>\n"
+        "  <script src=\"js/script.js\" type=\"text/javascript\">\n  </script>\n"
+        " </head>\n"
+        " <body onload=\"CheckLocation();\">\n"
+        "  <div class=\"page_wrap\">\n"
+        "   <div class=\"page_header\">\n"
+        "    <div class=\"content\">\n"
+        f"     <div class=\"text bold\">\n{title}\n     </div>\n"
+        "    </div>\n"
+        "   </div>\n"
+        "   <div class=\"page_body chat_page\">\n"
+        "    <div class=\"history\">\n"
+        f"{history}"
+        "    </div>\n"
+        "   </div>\n"
+        "  </div>\n"
+        " </body>\n</html>\n"
+    )
+
+
+def _render_history(
+    messages: list[dict[str, Any]],
+    media_map: dict[tuple[int, str], str],
+) -> str:
+    parts: list[str] = []
+    prev_day: datetime.date | None = None
+    prev_from_id: str | None = None
+    day_counter = 0
+
     for msg in messages:
-        parts.append(_render_message(msg, media_map))
-    parts.append("</div></body></html>")
+        msg_type = str(msg.get("type") or "message")
+        if msg_type == "service":
+            parts.append(_render_service_message(msg))
+            prev_from_id = None
+            continue
+
+        dt = _msg_datetime(msg)
+        if dt is not None and (prev_day is None or dt.date() != prev_day):
+            day_counter += 1
+            parts.append(_render_date_separator(dt, day_counter))
+            prev_day = dt.date()
+            prev_from_id = None
+
+        from_id = str(msg.get("from_id") or "")
+        joined = bool(from_id and from_id == prev_from_id)
+        parts.append(_render_default_message(msg, media_map, joined=joined))
+        prev_from_id = from_id if from_id else None
+
     return "".join(parts)
 
 
-def _render_message(
+def _render_date_separator(dt: datetime, counter: int) -> str:
+    label = f"{dt.day} {_MONTHS[dt.month - 1]} {dt.year}"
+    return (
+        f"     <div class=\"message service\" id=\"message-day-{counter}\">\n"
+        "      <div class=\"body details\">\n"
+        f"{html.escape(label)}\n"
+        "      </div>\n"
+        "     </div>\n\n"
+    )
+
+
+def _render_service_message(msg: dict[str, Any]) -> str:
+    mid = int(msg.get("id") or 0)
+    body = extract_text(msg.get("text")) or str(msg.get("action") or "")
+    return (
+        f"     <div class=\"message service\" id=\"message{mid}\">\n"
+        "      <div class=\"body details\">\n"
+        f"{html.escape(body)}\n"
+        "      </div>\n"
+        "     </div>\n\n"
+    )
+
+
+def _render_default_message(
     msg: dict[str, Any],
     media_map: dict[tuple[int, str], str],
+    *,
+    joined: bool,
 ) -> str:
     mid = int(msg.get("id") or 0)
+    dt = _msg_datetime(msg)
+    time_label = dt.strftime("%H:%M") if dt else ""
+    title = _date_title(dt) if dt else ""
     from_name = html.escape(str(msg.get("from") or "Unknown"))
-    date_unix = msg.get("date_unixtime")
-    if date_unix is None:
-        date_text = html.escape(str(msg.get("date") or ""))
-    else:
-        dt = datetime.fromtimestamp(int(date_unix), tz=timezone.utc).astimezone(UTC8)
-        date_text = dt.strftime("%Y-%m-%d %H:%M:%S")
-    text_val = extract_text(msg.get("text"))
-    text_html = html.escape(text_val or "")
+    from_id = str(msg.get("from_id") or from_name)
+    pic_idx = _userpic_index(from_id)
+    initials = _initials(str(msg.get("from") or "?"))
 
-    media_nodes: list[str] = []
+    joined_cls = " joined" if joined else ""
+    lines: list[str] = [
+        f"     <div class=\"message default clearfix{joined_cls}\" id=\"message{mid}\">\n",
+    ]
+    if not joined:
+        lines.extend(
+            [
+                "      <div class=\"pull_left userpic_wrap\">\n",
+                f"       <div class=\"userpic userpic{pic_idx}\" style=\"width: 42px; height: 42px\">\n",
+                f"        <div class=\"initials\" style=\"line-height: 42px\">\n{html.escape(initials)}\n",
+                "        </div>\n",
+                "       </div>\n",
+                "      </div>\n",
+            ]
+        )
+    lines.append("      <div class=\"body\">\n")
+    if title:
+        lines.append(
+            f"       <div class=\"pull_right date details\" title=\"{html.escape(title)}\">\n"
+            f"{html.escape(time_label)}\n"
+            "       </div>\n"
+        )
+    if not joined:
+        lines.append(
+            f"       <div class=\"from_name\">\n{from_name} \n       </div>\n"
+        )
+
+    reply_id = msg.get("reply_to_message_id")
+    if reply_id is not None:
+        lines.append(
+            "       <div class=\"reply_to details\">\n"
+            f"In reply to <a href=\"#go_to_message{int(reply_id)}\" "
+            f"onclick=\"return GoToMessage({int(reply_id)})\">this message</a>\n"
+            "       </div>\n"
+        )
+
+    text_html = _format_text_html(msg.get("text"))
+    if text_html:
+        lines.append(f"       <div class=\"text\">\n{text_html}\n       </div>\n")
+
+    lines.extend(_render_media_blocks(msg, media_map))
+    lines.append("      </div>\n")
+    lines.append("     </div>\n\n")
+    return "".join(lines)
+
+
+def _render_media_blocks(
+    msg: dict[str, Any],
+    media_map: dict[tuple[int, str], str],
+) -> list[str]:
+    mid = int(msg.get("id") or 0)
+    blocks: list[str] = []
     for kind, rel in extract_media_refs(msg):
         abs_path = media_map.get((mid, rel))
-        if not abs_path:
+        if not abs_path or not Path(abs_path).is_file():
             continue
-        uri = Path(abs_path).resolve().as_uri()
         rel_esc = html.escape(rel)
         if kind == "photo":
-            media_nodes.append(f"<img loading='lazy' src='{uri}' alt='{rel_esc}'>")
+            blocks.extend(
+                [
+                    "       <div class=\"media_wrap clearfix\">\n",
+                    f"        <a class=\"photo_wrap clearfix pull_left\" href=\"{rel_esc}\">\n",
+                    f"         <img class=\"photo\" src=\"{rel_esc}\" "
+                    "style=\"width: 260px; height: auto\"/>\n",
+                    "        </a>\n",
+                    "       </div>\n",
+                ]
+            )
         elif kind in ("video", "animation", "video_note"):
-            media_nodes.append(f"<video controls preload='metadata' src='{uri}'></video>")
+            blocks.extend(
+                [
+                    "       <div class=\"media_wrap clearfix\">\n",
+                    f"        <video class=\"video_file\" controls preload=\"metadata\" "
+                    f"src=\"{rel_esc}\"></video>\n",
+                    "       </div>\n",
+                ]
+            )
         elif kind in ("voice_message", "audio", "music"):
-            media_nodes.append(f"<audio controls src='{uri}'></audio>")
+            blocks.extend(
+                [
+                    "       <div class=\"media_wrap clearfix\">\n",
+                    f"        <audio controls src=\"{rel_esc}\"></audio>\n",
+                    "       </div>\n",
+                ]
+            )
         else:
-            media_nodes.append(f"<a href='{uri}' target='_blank'>{rel_esc}</a>")
-    media_html = ""
-    if media_nodes:
-        media_html = "<div class='media'>" + "".join(media_nodes) + "</div>"
-    return (
-        "<div class='msg'>"
-        f"<div class='meta'><span class='name'>{from_name}</span><span>{date_text}</span></div>"
-        f"<div class='txt'>{text_html}</div>"
-        f"{media_html}"
-        "</div>"
-    )
+            blocks.extend(
+                [
+                    "       <div class=\"media_wrap clearfix\">\n",
+                    f"        <a href=\"{rel_esc}\">{rel_esc}</a>\n",
+                    "       </div>\n",
+                ]
+            )
+    return blocks
+
+
+def _format_text_html(raw: Any) -> str:
+    if raw is None:
+        return ""
+    if isinstance(raw, str):
+        return html.escape(raw).replace("\n", "<br>")
+    if not isinstance(raw, list):
+        return html.escape(str(raw))
+
+    parts: list[str] = []
+    for item in raw:
+        if isinstance(item, str):
+            parts.append(html.escape(item).replace("\n", "<br>"))
+            continue
+        if not isinstance(item, dict):
+            continue
+        entity_type = str(item.get("type") or "plain")
+        text = str(item.get("text") or "")
+        escaped = html.escape(text).replace("\n", "<br>")
+        if entity_type == "link":
+            href = html.escape(text, quote=True)
+            parts.append(f'<a href="{href}">{escaped}</a>')
+        elif entity_type == "bold":
+            parts.append(f"<strong>{escaped}</strong>")
+        elif entity_type == "italic":
+            parts.append(f"<em>{escaped}</em>")
+        elif entity_type == "underline":
+            parts.append(f"<u>{escaped}</u>")
+        elif entity_type == "strikethrough":
+            parts.append(f"<s>{escaped}</s>")
+        elif entity_type == "code":
+            parts.append(f"<code>{escaped}</code>")
+        elif entity_type == "pre":
+            parts.append(f"<pre>{escaped}</pre>")
+        elif entity_type == "spoiler":
+            parts.append(f'<span class="spoiler hidden">{escaped}</span>')
+        else:
+            parts.append(escaped)
+    return "".join(parts)
+
+
+def _msg_datetime(msg: dict[str, Any]) -> datetime | None:
+    raw = msg.get("date_unixtime")
+    if raw is None:
+        return None
+    try:
+        return datetime.fromtimestamp(int(raw), tz=timezone.utc).astimezone(UTC8)
+    except (TypeError, ValueError):
+        return None
+
+
+def _date_title(dt: datetime) -> str:
+    return dt.strftime("%d.%m.%Y %H:%M:%S UTC+08:00")
+
+
+def _userpic_index(from_id: str) -> int:
+    return (sum(ord(ch) for ch in from_id) % 8) + 1
+
+
+def _initials(name: str) -> str:
+    name = name.strip()
+    if not name:
+        return "?"
+    chunks = name.split()
+    if len(chunks) >= 2:
+        return (chunks[0][:1] + chunks[1][:1]).upper()
+    if len(name) >= 2:
+        return name[:2]
+    return name[:1]
