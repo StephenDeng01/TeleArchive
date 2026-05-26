@@ -145,13 +145,27 @@ def _try_fetch_sha256_sidecar(download_url: str, *, timeout: float) -> str | Non
     return None
 
 
+def _normalize_sha256(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    sha = value.strip().lower()
+    if re.fullmatch(r"[0-9a-f]{64}", sha):
+        return sha
+    return None
+
+
 def resolve_release_sha256(release: ReleaseInfo, *, timeout: float = 20.0) -> ReleaseInfo:
     """Fill missing sha256 from Release sidecar asset when manifest is stale."""
     if release.sha256:
         return release
-    if not release.download_url:
-        return release
-    sha = _try_fetch_sha256_sidecar(release.download_url, timeout=timeout)
+    sha: str | None = None
+    if release.download_url:
+        sha = _try_fetch_sha256_sidecar(release.download_url, timeout=timeout)
+    if not sha and release.tag:
+        sha = _try_fetch_sha256_sidecar(
+            f"https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}/releases/download/{release.tag}/TeleArchive.exe",
+            timeout=timeout,
+        )
     if sha:
         return replace(release, sha256=sha)
     return release
@@ -208,14 +222,15 @@ def _release_from_payload(payload: dict[str, Any]) -> ReleaseInfo:
                 download_url = str(asset.get("browser_download_url") or "") or None
                 break
 
-    sha256 = payload.get("sha256")
-    if isinstance(sha256, str):
-        sha256 = sha256.strip().lower() or None
-    else:
-        sha256 = None
+    sha256 = _normalize_sha256(payload.get("sha256"))
 
     if not sha256 and isinstance(download_url, str) and download_url:
         sha256 = _try_fetch_sha256_sidecar(download_url, timeout=8.0)
+    if not sha256 and tag:
+        sha256 = _try_fetch_sha256_sidecar(
+            f"https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}/releases/download/{tag}/TeleArchive.exe",
+            timeout=8.0,
+        )
 
     if not version:
         raise ValueError("Release metadata incomplete")

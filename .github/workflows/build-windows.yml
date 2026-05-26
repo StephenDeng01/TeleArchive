@@ -32,13 +32,15 @@ jobs:
           cache: pip
 
       - name: Install and build
+        shell: pwsh
         run: |
           python -m pip install --upgrade pip
           pip install ".[build]"
           pyinstaller --noconfirm --clean telearchive.spec
           $h = (Get-FileHash -Algorithm SHA256 dist\TeleArchive.exe).Hash.ToLower()
+          if ($h -notmatch '^[0-9a-f]{64}$') { throw "invalid sha256: $h" }
           Set-Content -NoNewline -Encoding ascii dist\TeleArchive.exe.sha256 $h
-          dir dist
+          Get-ChildItem dist | Format-Table Name, Length
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -49,16 +51,7 @@ jobs:
             dist/TeleArchive.exe.sha256
           retention-days: 90
 
-      - name: Publish GitHub Release (tag push)
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            dist/TeleArchive.exe
-            dist/TeleArchive.exe.sha256
-          generate_release_notes: true
-
-      - name: Update version.json
+      - name: Write version manifest (with sha256)
         if: startsWith(github.ref, 'refs/tags/v')
         shell: bash
         run: |
@@ -73,6 +66,14 @@ jobs:
           sha = Path("dist/TeleArchive.exe.sha256").read_text(encoding="utf-8").strip().lower()
           if not re.fullmatch(r"[0-9a-f]{64}", sha):
               raise SystemExit(f"invalid sha256 in dist/TeleArchive.exe.sha256: {sha!r}")
+          notes = ""
+          manifest = Path("version.json")
+          if manifest.is_file():
+              try:
+                  old = json.loads(manifest.read_text(encoding="utf-8"))
+                  notes = str(old.get("notes") or "")
+              except json.JSONDecodeError:
+                  pass
           doc = {
               "version": version,
               "tag": tag,
@@ -80,19 +81,45 @@ jobs:
               "release_url": f"https://github.com/{owner}/{repo}/releases/tag/{tag}",
               "download_url": f"https://github.com/{owner}/{repo}/releases/download/{tag}/TeleArchive.exe",
               "sha256": sha,
-              "notes": "",
+              "notes": notes,
           }
-          with open("version.json", "w", encoding="utf-8") as f:
-              json.dump(doc, f, ensure_ascii=False, indent=2)
-              f.write("\n")
+          manifest.write_text(json.dumps(doc, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+          Path(os.environ["RUNNER_TEMP"]).joinpath("telearchive-version.json").write_text(
+              manifest.read_text(encoding="utf-8"), encoding="utf-8"
+          )
           PY
+
+      - name: Publish GitHub Release (tag push)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/TeleArchive.exe
+            dist/TeleArchive.exe.sha256
+          fail_on_unmatched_files: true
+          generate_release_notes: true
+
+      - name: Verify release assets on CDN
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          BASE="https://github.com/${{ github.repository }}/releases/download/${TAG}"
+          code_exe=$(curl -fsSL -o /dev/null -w "%{http_code}" "${BASE}/TeleArchive.exe")
+          code_sha=$(curl -fsSL -o /dev/null -w "%{http_code}" "${BASE}/TeleArchive.exe.sha256")
+          echo "TeleArchive.exe -> ${code_exe}"
+          echo "TeleArchive.exe.sha256 -> ${code_sha}"
+          test "${code_exe}" = "200"
+          test "${code_sha}" = "200"
+          curl -fsSL "${BASE}/TeleArchive.exe.sha256" | grep -E '^[0-9a-f]{64}$'
 
       - name: Push version.json to main
         if: startsWith(github.ref, 'refs/tags/v')
         shell: bash
         run: |
           MANIFEST="${RUNNER_TEMP}/telearchive-version.json"
-          cp version.json "$MANIFEST"
+          test -f "$MANIFEST" || (echo "missing manifest at $MANIFEST" && exit 1)
+          grep -E '"sha256": "[0-9a-f]{64}"' "$MANIFEST"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch origin main
@@ -100,7 +127,8 @@ jobs:
           git pull origin main
           cp "$MANIFEST" version.json
           git add version.json
-          git diff --staged --quiet || git commit -m "chore: update version.json for ${{ github.ref_name }}"
+          git diff --staged --quiet && echo "version.json unchanged on main" && exit 0
+          git commit -m "chore: update version.json for ${{ github.ref_name }}"
           git push origin main
 
       - name: Publish GitHub Release (manual)
@@ -112,4 +140,5 @@ jobs:
           files: |
             dist/TeleArchive.exe
             dist/TeleArchive.exe.sha256
+          fail_on_unmatched_files: true
           generate_release_notes: true
