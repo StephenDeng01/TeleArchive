@@ -119,7 +119,7 @@ telearchive ingest ~/Downloads/ChatExport_2026-05-20
 telearchive ingest ~/Downloads/ChatExport_2026-05-20 ~/Downloads/ChatExport_2026-05-26
 
 # 导入父目录（自动发现其下全部 ChatExport_* 文件夹）
-telearchive ingest "./Telegram Desktop(1)"
+telearchive ingest ~/TeleArchive/exports
 
 # 查看合并结果
 telearchive status

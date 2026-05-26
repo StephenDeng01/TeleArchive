@@ -21,4 +21,5 @@ pyinstaller-build/
 .vscode/
 exports/
 data/
-Telegram Desktop(1)/
+ChatExport*/
+Telegram Desktop*/
