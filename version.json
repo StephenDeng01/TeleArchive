@@ -1,0 +1,8 @@
+{
+  "version": "0.4.1",
+  "tag": "v0.4.1",
+  "title": "TeleArchive v0.4.1",
+  "release_url": "https://github.com/StephenDeng01/TeleArchive/releases/tag/v0.4.1",
+  "download_url": "https://github.com/StephenDeng01/TeleArchive/releases/download/v0.4.1/TeleArchive.exe",
+  "notes": "修复更新检查：优先读取 version.json，改进 GitHub API 错误提示。"
+}

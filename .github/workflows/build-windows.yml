@@ -52,6 +52,43 @@ jobs:
           files: dist/TeleArchive.exe
           generate_release_notes: true
 
+      - name: Update version.json
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          export VERSION="${GITHUB_REF_NAME#v}"
+          export TAG="${GITHUB_REF_NAME}"
+          python - <<'PY'
+          import json, os
+          version = os.environ["VERSION"].removeprefix("v")
+          tag = os.environ["TAG"]
+          owner, repo = "StephenDeng01", "TeleArchive"
+          doc = {
+              "version": version,
+              "tag": tag,
+              "title": f"TeleArchive {tag}",
+              "release_url": f"https://github.com/{owner}/{repo}/releases/tag/{tag}",
+              "download_url": f"https://github.com/{owner}/{repo}/releases/download/{tag}/TeleArchive.exe",
+              "notes": "",
+          }
+          with open("version.json", "w", encoding="utf-8") as f:
+              json.dump(doc, f, ensure_ascii=False, indent=2)
+              f.write("\n")
+          PY
+
+      - name: Push version.json to main
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git checkout main
+          git pull origin main
+          git checkout ${{ github.ref_name }} -- version.json
+          git add version.json
+          git diff --staged --quiet || git commit -m "chore: update version.json for ${{ github.ref_name }}"
+          git push origin main
+
       - name: Publish GitHub Release (manual)
         if: github.event_name == 'workflow_dispatch' && inputs.create_release
         uses: softprops/action-gh-release@v2
