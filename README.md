@@ -56,7 +56,7 @@ TeleArchive 面向 **无法使用 Telegram Bot / 官方 API**，但仍需长期�
 - 📎 **媒体感知** — 解析 JSON 相对路径，校验文件存在，按内容哈希关联跨批次附件
 - 🧭 **批次可追溯** — 记录每条消息的首次来源导出与导入历史
 - 🕳️ **缺口分析** — `gaps` 命令识别 message ID 序列空洞，辅助判断删消息区间
-- 📥 **开箱即用** — 提供 Windows 单文件可执行程序，亦可通过 pip 安装
+- 📥 **开箱即用** — Windows 提供图形界面，双击即可使用；亦支持命令行与 pip 安装
 
 ---
 
@@ -98,9 +98,13 @@ source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -e .
 ```
 
-**方式 B — Windows 可执行文件**
+**方式 B — Windows 桌面版（推荐普通用户）**
 
-前往 [Releases](https://github.com/StephenDeng01/TeleArchive/releases) 下载 `telearchive.exe`，无需安装 Python。详见 [Windows 用户](#-windows-用户)。
+1. 前往 [Releases](https://github.com/StephenDeng01/TeleArchive/releases) 下载 **`TeleArchive.exe`**
+2. **双击运行**，无需安装 Python，无需命令行
+3. 在界面中添加导出文件夹 → 点击 **「导入合并」**
+
+详见 [Windows 用户](#-windows-用户)。
 
 ### ⌨️ 基本用法
 
@@ -255,22 +259,27 @@ df = pd.read_sql("SELECT * FROM messages WHERE chat_id = ?", conn, params=(chat_
 ### ⬇️ 下载
 
 1. 打开 [Releases](https://github.com/StephenDeng01/TeleArchive/releases)
-2. 下载最新版 **`telearchive.exe`**（单文件，免安装，约 15–25 MB）
+2. 下载 **`TeleArchive.exe`**（单文件，免安装，约 15–25 MB）
 
-### 💻 使用示例
+### 🖥️ 图形界面（推荐）
+
+**双击 `TeleArchive.exe`** 即可打开，无需命令行：
+
+1. **添加文件夹** — 选择 Telegram 导出的 `ChatExport_*` 目录，或点「添加多个」选父文件夹自动发现
+2. **导入合并** — 一键合并去重，结果写入数据库
+3. **查看状态** — 消息总数、媒体索引、导入历史
+4. **缺口分析** — 查看因自动删消息造成的 ID 空洞
+
+数据库路径可在界面顶部修改（默认 `data\telearchive.db`）。
+
+### ⌨️ 命令行（高级）
+
+若需脚本化或批处理，可加 `--cli` 使用命令行模式：
 
 ```powershell
-.\telearchive.exe init
-.\telearchive.exe ingest "D:\Downloads\ChatExport_2026-05-26"
-.\telearchive.exe ingest "D:\Downloads\Telegram Desktop(1)"
-.\telearchive.exe status
-.\telearchive.exe gaps --min-gap 10
-```
-
-指定数据库路径：
-
-```powershell
-.\telearchive.exe ingest --db D:\TeleArchive\archive.db "D:\exports\batch1"
+.\TeleArchive.exe --cli ingest "D:\Downloads\ChatExport_2026-05-26"
+.\TeleArchive.exe --cli status
+.\TeleArchive.exe --cli gaps --min-gap 10
 ```
 
 ### 🔨 自行构建
@@ -279,17 +288,17 @@ df = pd.read_sql("SELECT * FROM messages WHERE chat_id = ?", conn, params=(chat_
 git clone https://github.com/StephenDeng01/TeleArchive.git
 cd TeleArchive
 .\scripts\build_windows.ps1
-# 输出: dist\telearchive.exe
+# 输出: dist\TeleArchive.exe
 ```
 
 ### 🚢 发布新版本（维护者）
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.2.0
+git push origin v0.2.0
 ```
 
-推送 `v*` 标签后，GitHub Actions 将自动构建 Windows 可执行文件并发布至 Releases。亦可于 **Actions → Build Windows exe** 手动触发工作流。
+推送 `v*` 标签后，GitHub Actions 将自动构建并发布至 Releases。亦可于 **Actions → Build Windows exe** 手动触发工作流。
 
 ---
 

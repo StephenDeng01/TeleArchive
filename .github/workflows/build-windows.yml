@@ -42,14 +42,14 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: telearchive-windows-x64
-          path: dist/telearchive.exe
+          path: dist/TeleArchive.exe
           retention-days: 90
 
       - name: Publish GitHub Release (tag push)
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/telearchive.exe
+          files: dist/TeleArchive.exe
           generate_release_notes: true
 
       - name: Publish GitHub Release (manual)
@@ -58,5 +58,5 @@ jobs:
         with:
           tag_name: ${{ inputs.tag }}
           name: TeleArchive ${{ inputs.tag }}
-          files: dist/telearchive.exe
+          files: dist/TeleArchive.exe
           generate_release_notes: true
