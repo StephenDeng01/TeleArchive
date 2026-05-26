@@ -1,9 +1,9 @@
 {
-  "version": "0.5.1",
-  "tag": "v0.5.1",
-  "title": "TeleArchive v0.5.1",
-  "release_url": "https://github.com/StephenDeng01/TeleArchive/releases/tag/v0.5.1",
-  "download_url": "https://github.com/StephenDeng01/TeleArchive/releases/download/v0.5.1/TeleArchive.exe",
-  "sha256": "5ab34a90cb41d0bbfc61587744bc859b3e0c16ce4b49e1c9a27844d23bb13c58",
-  "notes": "导入合并成功后自动清空 Telegram 导出文件夹列表，避免重复导入。"
+  "version": "0.5.2",
+  "tag": "v0.5.2",
+  "title": "TeleArchive v0.5.2",
+  "release_url": "https://github.com/StephenDeng01/TeleArchive/releases/tag/v0.5.2",
+  "download_url": "https://github.com/StephenDeng01/TeleArchive/releases/download/v0.5.2/TeleArchive.exe",
+  "sha256": "",
+  "notes": "更新检查增加缓存绕过与 sha256 旁路获取，避免“立即更新”因 manifest 缓存导致 sha 缺失。"
 }

@@ -9,6 +9,7 @@ import subprocess
 import tempfile
 import re
 import sys
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -92,11 +93,54 @@ def _http_get_json(url: str, *, timeout: float) -> Any:
         url,
         headers={
             "Accept": "application/vnd.github+json",
+            "Cache-Control": "no-cache",
             "User-Agent": USER_AGENT,
         },
     )
     with urllib.request.urlopen(request, timeout=timeout) as response:
         return json.loads(response.read().decode("utf-8"))
+
+
+def _http_get_text(url: str, *, timeout: float) -> str:
+    request = urllib.request.Request(
+        url,
+        headers={
+            "Accept": "text/plain,*/*",
+            "Cache-Control": "no-cache",
+            "User-Agent": USER_AGENT,
+        },
+    )
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return response.read().decode("utf-8", errors="replace")
+
+
+def _try_fetch_sha256_sidecar(download_url: str, *, timeout: float) -> str | None:
+    """
+    Try to fetch an adjacent .sha256 file from GitHub Releases.
+
+    Expected contents: either a bare hex digest, or common formats like:
+    - SHA256: <hex>
+    - <hex>  TeleArchive.exe
+    """
+    candidates = []
+    if download_url.endswith(".exe"):
+        candidates.append(download_url + ".sha256")
+        candidates.append(download_url.removesuffix(".exe") + ".exe.sha256")
+    else:
+        candidates.append(download_url + ".sha256")
+
+    for url in candidates:
+        try:
+            raw = _http_get_text(url, timeout=timeout).strip()
+        except (urllib.error.URLError, TimeoutError, ValueError, urllib.error.HTTPError):
+            continue
+        raw = raw.replace("\r\n", "\n")
+        first_line = raw.split("\n", 1)[0].strip()
+        # extract first 64-hex sequence if present
+        m = re.search(r"\b([0-9a-fA-F]{64})\b", first_line)
+        if m:
+            return m.group(1).lower()
+    return None
 
 
 def _parse_github_http_error(exc: urllib.error.HTTPError) -> str:
@@ -156,6 +200,9 @@ def _release_from_payload(payload: dict[str, Any]) -> ReleaseInfo:
     else:
         sha256 = None
 
+    if not sha256 and isinstance(download_url, str) and download_url:
+        sha256 = _try_fetch_sha256_sidecar(download_url, timeout=8.0)
+
     if not version:
         raise ValueError("Release metadata incomplete")
 
@@ -171,7 +218,9 @@ def _release_from_payload(payload: dict[str, Any]) -> ReleaseInfo:
 
 
 def fetch_latest_from_manifest(timeout: float = 8.0) -> ReleaseInfo:
-    payload = _http_get_json(VERSION_MANIFEST_URL, timeout=timeout)
+    # raw.githubusercontent.com is cached; add cache-busting query param
+    url = f"{VERSION_MANIFEST_URL}?ts={int(time.time())}"
+    payload = _http_get_json(url, timeout=timeout)
     if not isinstance(payload, dict):
         raise ValueError("version.json 格式无效")
     return _release_from_payload(payload)
