@@ -89,14 +89,16 @@ jobs:
 
       - name: Push version.json to main
         if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
         run: |
-          cp version.json /tmp/telearchive-version.json
+          MANIFEST="${RUNNER_TEMP}/telearchive-version.json"
+          cp version.json "$MANIFEST"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch origin main
           git checkout main
           git pull origin main
-          cp /tmp/telearchive-version.json version.json
+          cp "$MANIFEST" version.json
           git add version.json
           git diff --staged --quiet || git commit -m "chore: update version.json for ${{ github.ref_name }}"
           git push origin main
