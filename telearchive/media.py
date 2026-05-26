@@ -67,6 +67,15 @@ def file_content_hash(path: Path) -> str | None:
     return digest.hexdigest()
 
 
+def _path_inside_root(path: Path, root: Path) -> bool:
+    """Reject path traversal (e.g. ../../outside/file) outside export_root."""
+    try:
+        path.resolve().relative_to(root.resolve())
+        return True
+    except ValueError:
+        return False
+
+
 def resolve_attachments(
     export_root: Path,
     msg: dict[str, Any],
@@ -76,6 +85,8 @@ def resolve_attachments(
     out: list[MediaAttachment] = []
     for kind, rel in extract_media_refs(msg):
         absolute = (root / rel).resolve()
+        if not _path_inside_root(absolute, root):
+            continue
         exists = absolute.is_file()
         size = absolute.stat().st_size if exists else None
         content_hash = file_content_hash(absolute) if exists else None
