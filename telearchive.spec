@@ -36,6 +36,7 @@ hiddenimports = (
     "telearchive.export_chat",
     "telearchive.html_board",
     "telearchive.board_browser",
+    "telearchive.board_embed",
 ]
 )
 

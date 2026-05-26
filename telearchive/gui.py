@@ -15,7 +15,8 @@ from telearchive.coverage import export_coverage, find_id_gaps
 from telearchive.db import Database
 from telearchive.export_chat import export_chat_range
 from telearchive.export_dates import default_datetime_bounds, set_shortcut_range
-from telearchive.board_browser import close_board_html, show_board_html
+from telearchive.board_browser import show_board_html
+from telearchive.board_embed import EmbeddedBoardFrame, is_embed_supported
 from telearchive.html_board import (
     BoardRenderResult,
     render_range_to_cache,
@@ -56,6 +57,7 @@ class TeleArchiveApp(tk.Tk):
         self._busy = False
         self._board_loaded_file: Path | None = None
         self._board_bundle_dir: Path | None = None
+        self._board_embed: EmbeddedBoardFrame | None = None
         self._board_cache_dir = default_html_cache_dir().resolve()
 
         self._build_ui()
@@ -270,26 +272,33 @@ class TeleArchiveApp(tk.Tk):
         self.board_status = ttk.Label(board_status_row, text="未加载", anchor=tk.W)
         self.board_status.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
-        board_hint = ttk.Frame(board_frame)
-        board_hint.pack(fill=tk.BOTH, expand=True)
-        self.board_preview = scrolledtext.ScrolledText(
-            board_hint,
-            height=20,
-            font=("Segoe UI", 10),
-            wrap=tk.WORD,
-            state=tk.DISABLED,
-        )
-        self.board_preview.pack(fill=tk.BOTH, expand=True, pady=(0, 6))
-        self._set_board_preview(
-            "聊天看板使用 Telegram 原生 HTML 导出格式渲染。\n"
-            "点击「刷新预览」后，将在应用内浏览器窗口（WebView2）中打开，"
-            "与 Telegram Desktop 导出的 messages.html 显示效果一致。\n"
-        )
-        board_btn_row = ttk.Frame(board_hint)
+        board_view_host = ttk.Frame(board_frame)
+        board_view_host.pack(fill=tk.BOTH, expand=True, pady=(0, 6))
+        if is_embed_supported():
+            self._board_embed = EmbeddedBoardFrame(board_view_host)
+            self._board_embed.pack(fill=tk.BOTH, expand=True)
+        else:
+            self._board_embed = None
+            fallback = scrolledtext.ScrolledText(
+                board_view_host,
+                height=16,
+                font=("Segoe UI", 10),
+                wrap=tk.WORD,
+                state=tk.DISABLED,
+            )
+            fallback.pack(fill=tk.BOTH, expand=True)
+            fallback.configure(state=tk.NORMAL)
+            fallback.insert(
+                tk.END,
+                "当前系统不支持内嵌 WebView2，请使用「在系统浏览器中打开」。\n",
+            )
+            fallback.configure(state=tk.DISABLED)
+
+        board_btn_row = ttk.Frame(board_frame)
         board_btn_row.pack(fill=tk.X)
         self.btn_board_open = ttk.Button(
             board_btn_row,
-            text="在浏览器看板中打开",
+            text="在系统浏览器中打开",
             command=self._open_board_in_browser,
         )
         self.btn_board_open.pack(side=tk.LEFT)
@@ -630,12 +639,6 @@ class TeleArchiveApp(tk.Tk):
             raise ValueError("数据库中有多个群聊，请填写群聊ID。")
         return chats[0].chat_id
 
-    def _set_board_preview(self, text: str) -> None:
-        self.board_preview.configure(state=tk.NORMAL)
-        self.board_preview.delete("1.0", tk.END)
-        self.board_preview.insert(tk.END, text)
-        self.board_preview.configure(state=tk.DISABLED)
-
     def _render_board(self) -> None:
         def worker() -> None:
             db_path = Path(self.db_path.get())
@@ -665,21 +668,20 @@ class TeleArchiveApp(tk.Tk):
                 f"{self.board_from.get()} ~ {self.board_to.get()} | {source}"
             )
         )
-        preview = (
-            f"群聊: {result.chat_name}\n"
-            f"消息: {result.message_count} 条\n"
-            f"范围: {self.board_from.get()} ~ {self.board_to.get()} ({source})\n"
-            f"HTML: {html_path}\n\n"
-            "正在打开应用内浏览器看板…"
-        )
-        self._set_board_preview(preview)
-        try:
-            note = show_board_html(html_path)
-            self._log(note)
-            self._set_board_preview(preview + f"\n{note}")
-        except Exception as exc:  # noqa: BLE001
-            messagebox.showerror("打开看板失败", str(exc))
-            self._log(f"打开看板失败: {exc}")
+        self._log(f"看板 HTML: {html_path} ({source})")
+        if self._board_embed is not None:
+            try:
+                self._board_embed.load_file(html_path)
+                self._log("看板已在内嵌 WebView2 中加载。")
+            except Exception as exc:  # noqa: BLE001
+                messagebox.showerror("内嵌看板失败", str(exc))
+                self._log(f"内嵌看板失败: {exc}")
+        else:
+            try:
+                note = show_board_html(html_path)
+                self._log(note)
+            except Exception as exc:  # noqa: BLE001
+                messagebox.showerror("打开看板失败", str(exc))
 
     def _open_board_in_browser(self) -> None:
         if self._board_loaded_file is None or not self._board_loaded_file.is_file():
@@ -704,7 +706,8 @@ class TeleArchiveApp(tk.Tk):
             messagebox.showinfo("缓存目录", str(cache))
 
     def _close_board(self) -> None:
-        close_board_html()
+        if self._board_embed is not None:
+            self._board_embed.clear()
         if self._board_loaded_file is not None:
             bundle_dir = self._board_loaded_file.parent
             try:
@@ -714,10 +717,10 @@ class TeleArchiveApp(tk.Tk):
         self._board_loaded_file = None
         self._board_bundle_dir = None
         self.board_status.configure(text="未加载")
-        self._set_board_preview("看板已关闭。\n")
 
     def _on_close(self) -> None:
-        close_board_html()
+        if self._board_embed is not None:
+            self._board_embed.shutdown()
         self.destroy()
 
     def _warmup_html_cache_async(self, chat_id: int) -> None:
