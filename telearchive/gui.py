@@ -323,6 +323,7 @@ class TeleArchiveApp(tk.Tk):
                     )
             text = "\n".join(lines)
             self.after(0, lambda: self._log(text))
+            self.after(0, self._clear_folders)
             self.after(
                 0,
                 lambda: messagebox.showinfo(
