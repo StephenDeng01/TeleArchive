@@ -1,21 +1,35 @@
 import json
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
 
 from telearchive.db import Database
 from telearchive.export_chat import export_chat_range
-from telearchive.export_dates import parse_bound
+from telearchive.export_dates import parse_bound, set_shortcut_range
 from telearchive.merge import ingest_paths
 
 FIXTURES = Path(__file__).parent / "fixtures"
+UTC8 = timezone(timedelta(hours=8))
 
 
 def test_parse_bound() -> None:
     assert parse_bound("2026-05-20") == parse_bound("2026-05-20T00:00:00")
-    end = parse_bound("2026-05-20", end_of_day=True)
     start = parse_bound("2026-05-20")
+    end = parse_bound("2026-05-20", end_of_day=True)
+    assert start == int(datetime(2026, 5, 20, 0, 0, 0, tzinfo=UTC8).timestamp())
+    assert end == int(datetime(2026, 5, 20, 23, 59, 59, tzinfo=UTC8).timestamp())
     assert end > start
+    assert parse_bound("2026-05-20T15:30:00") == int(
+        datetime(2026, 5, 20, 15, 30, 0, tzinfo=UTC8).timestamp()
+    )
+
+
+def test_set_shortcut_range_includes_time() -> None:
+    ref = datetime(2026, 5, 27, 14, 0, 0, tzinfo=UTC8)
+    start, end = set_shortcut_range("today", now=ref)
+    assert start == "2026-05-27T00:00:00"
+    assert end == "2026-05-27T23:59:59"
 
 
 def test_export_json_structure(tmp_path: Path) -> None:

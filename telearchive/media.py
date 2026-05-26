@@ -42,8 +42,11 @@ def extract_media_refs(msg: dict[str, Any]) -> list[tuple[str, str]]:
         seen.add(p)
         refs.append((kind, p))
 
-    add("photo", msg.get("photo"))
+    photo = msg.get("photo")
+    add("photo", photo)
     add("thumbnail", msg.get("thumbnail"))
+    if isinstance(photo, str) and photo.strip():
+        add("thumbnail", photo_thumb_relative(photo.strip()))
     add("sticker", msg.get("sticker"))
     add("contact_vcard", msg.get("contact_vcard"))
     add("media", msg.get("media"))
@@ -54,6 +57,15 @@ def extract_media_refs(msg: dict[str, Any]) -> list[tuple[str, str]]:
         add(str(kind) if kind else "file", file_path.strip())
 
     return refs
+
+
+def photo_thumb_relative(photo_rel: str) -> str:
+    path = Path(photo_rel)
+    return str(path.with_name(f"{path.stem}_thumb{path.suffix}"))
+
+
+def is_raster_image_path(path: str) -> bool:
+    return Path(path).suffix.lower() in {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
 
 
 def file_content_hash(path: Path) -> str | None:

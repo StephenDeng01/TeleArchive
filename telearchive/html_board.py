@@ -2,24 +2,28 @@
 
 from __future__ import annotations
 
+import base64
 import html
 import json
-import re
+import mimetypes
 import shutil
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from telearchive.db import Database
-from telearchive.media import extract_media_refs
+from telearchive.export_dates import ALL_FROM, ALL_TO, UTC8, parse_bound
+from telearchive.media import (
+    extract_media_refs,
+    is_raster_image_path,
+    photo_thumb_relative,
+)
 from telearchive.parser import extract_text
 
-UTC8 = timezone(timedelta(hours=8))
-ALL_FROM = "1970-01-01"
-ALL_TO = "2099-12-31"
 # Bump when HTML/CSS rendering changes so stale html_cache bundles are rebuilt.
-BOARD_RENDER_VERSION = "r2"
+BOARD_RENDER_VERSION = "r3"
+_MAX_EMBED_BYTES = 3 * 1024 * 1024
 _MONTHS = (
     "January",
     "February",
@@ -48,43 +52,6 @@ class BoardRenderResult:
     cached: bool
 
 
-def parse_local_bound(value: str, *, end_of_day: bool = False) -> int:
-    text = value.strip()
-    if re.fullmatch(r"\d{9,12}", text):
-        return int(text)
-
-    normalized = text.replace(" ", "T")
-    for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"):
-        try:
-            dt = datetime.strptime(normalized, fmt)
-            if fmt == "%Y-%m-%d" and end_of_day:
-                dt = dt.replace(hour=23, minute=59, second=59)
-            return int(dt.replace(tzinfo=UTC8).timestamp())
-        except ValueError:
-            continue
-    raise ValueError(
-        f"无法解析时间: {value!r}，请使用 YYYY-MM-DD 或 YYYY-MM-DDTHH:MM:SS 或 Unix 时间戳"
-    )
-
-
-def set_shortcut_range(name: str, now: datetime | None = None) -> tuple[str, str]:
-    ref = now.astimezone(UTC8) if now else datetime.now(UTC8)
-    today = ref.date()
-    if name == "today":
-        start = today
-    elif name == "3d":
-        start = today - timedelta(days=2)
-    elif name == "7d":
-        start = today - timedelta(days=6)
-    elif name == "30d":
-        start = today - timedelta(days=29)
-    elif name == "all":
-        return (ALL_FROM, ALL_TO)
-    else:
-        raise ValueError(f"未知快捷范围: {name}")
-    return (start.isoformat(), today.isoformat())
-
-
 def render_range_to_cache(
     db: Database,
     cache_dir: Path,
@@ -92,8 +59,8 @@ def render_range_to_cache(
     from_text: str,
     to_text: str,
 ) -> BoardRenderResult:
-    from_ts = parse_local_bound(from_text, end_of_day=False)
-    to_ts = parse_local_bound(to_text, end_of_day=True)
+    from_ts = parse_bound(from_text, end_of_day=False)
+    to_ts = parse_bound(to_text, end_of_day=True)
     if from_ts > to_ts:
         raise ValueError(f"开始时间不能晚于结束时间: {from_text} > {to_text}")
 
@@ -201,13 +168,27 @@ def _copy_media_files(
         mid = msg.get("id")
         if mid is None:
             continue
-        for _kind, rel in extract_media_refs(msg):
+        for kind, rel in extract_media_refs(msg):
             if rel in seen:
                 continue
             seen.add(rel)
             src = media_map.get((int(mid), rel))
             if not src:
-                continue
+                if kind == "thumbnail":
+                    for _k, photo_rel in extract_media_refs(msg):
+                        if _k != "photo":
+                            continue
+                        photo_src = media_map.get((int(mid), photo_rel))
+                        if not photo_src:
+                            continue
+                        thumb_src = Path(photo_src).parent / Path(
+                            photo_thumb_relative(photo_rel)
+                        ).name
+                        if thumb_src.is_file():
+                            src = str(thumb_src)
+                        break
+                if not src:
+                    continue
             src_path = Path(src)
             if not src_path.is_file():
                 continue
@@ -244,7 +225,7 @@ def _render_native_html(
     bundle_dir: Path,
 ) -> str:
     title = html.escape(chat_name)
-    history = _render_history(messages, media_map)
+    history = _render_history(messages, media_map, bundle_dir)
     css = _read_bundle_css(bundle_dir)
     style_block = f"  <style>\n{css}\n  </style>\n" if css else ""
     return (
@@ -276,6 +257,7 @@ def _render_native_html(
 def _render_history(
     messages: list[dict[str, Any]],
     media_map: dict[tuple[int, str], str],
+    bundle_dir: Path,
 ) -> str:
     parts: list[str] = []
     prev_day: datetime.date | None = None
@@ -298,7 +280,9 @@ def _render_history(
 
         from_id = str(msg.get("from_id") or "")
         joined = bool(from_id and from_id == prev_from_id)
-        parts.append(_render_default_message(msg, media_map, joined=joined))
+        parts.append(
+            _render_default_message(msg, media_map, bundle_dir, joined=joined)
+        )
         prev_from_id = from_id if from_id else None
 
     return "".join(parts)
@@ -330,6 +314,7 @@ def _render_service_message(msg: dict[str, Any]) -> str:
 def _render_default_message(
     msg: dict[str, Any],
     media_map: dict[tuple[int, str], str],
+    bundle_dir: Path,
     *,
     joined: bool,
 ) -> str:
@@ -379,51 +364,169 @@ def _render_default_message(
         )
 
     text_html = _format_text_html(msg.get("text"))
-    if text_html:
+    if text_html and not _text_is_redundant_media_path(msg):
         lines.append(f"       <div class=\"text\">\n{text_html}\n       </div>\n")
 
-    lines.extend(_render_media_blocks(msg, media_map))
+    lines.extend(_render_media_blocks(msg, media_map, bundle_dir))
+    lines.extend(_render_reactions(msg))
     lines.append("      </div>\n")
     lines.append("     </div>\n\n")
     return "".join(lines)
 
 
+def _bundle_file(bundle_dir: Path, rel: str, media_map: dict[tuple[int, str]], mid: int) -> Path | None:
+    local = bundle_dir / rel
+    if local.is_file():
+        return local
+    remote = media_map.get((mid, rel))
+    if remote and Path(remote).is_file():
+        return Path(remote)
+    return None
+
+
+def _image_src_attr(path: Path) -> str:
+    embedded = _embed_image_data_uri(path)
+    if embedded:
+        return embedded
+    return html.escape(path.as_uri(), quote=True)
+
+
+def _embed_image_data_uri(path: Path) -> str | None:
+    if not path.is_file() or not is_raster_image_path(path.name):
+        return None
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return None
+    if size > _MAX_EMBED_BYTES:
+        return None
+    mime, _ = mimetypes.guess_type(path.name)
+    if not mime or not mime.startswith("image/"):
+        mime = "image/jpeg"
+    try:
+        payload = base64.standard_b64encode(path.read_bytes()).decode("ascii")
+    except OSError:
+        return None
+    return f"data:{mime};base64,{payload}"
+
+
+def _text_is_redundant_media_path(msg: dict[str, Any]) -> bool:
+    paths = {rel for _kind, rel in extract_media_refs(msg)}
+    text = extract_text(msg.get("text")).strip()
+    return bool(text and text in paths)
+
+
+def _render_reactions(msg: dict[str, Any]) -> list[str]:
+    raw = msg.get("reactions")
+    if not isinstance(raw, list) or not raw:
+        return []
+    items: list[str] = []
+    for reaction in raw:
+        if not isinstance(reaction, dict):
+            continue
+        emoji = str(reaction.get("emoji") or "").strip()
+        if not emoji:
+            continue
+        count = reaction.get("count")
+        count_html = ""
+        if count is not None:
+            try:
+                count_html = f"\n         <span class=\"count\">\n{int(count)}\n         </span>\n"
+            except (TypeError, ValueError):
+                pass
+        items.append(
+            "        <span class=\"reaction\">\n"
+            f"         <span class=\"emoji\">\n{html.escape(emoji)}\n         </span>\n"
+            f"{count_html}"
+            "        </span>\n"
+        )
+    if not items:
+        return []
+    return [
+        "       <span class=\"reactions\">\n",
+        *items,
+        "       </span>\n",
+    ]
+
+
 def _render_media_blocks(
     msg: dict[str, Any],
     media_map: dict[tuple[int, str], str],
+    bundle_dir: Path,
 ) -> list[str]:
     mid = int(msg.get("id") or 0)
     blocks: list[str] = []
+    rendered_photos: set[str] = set()
     for kind, rel in extract_media_refs(msg):
-        abs_path = media_map.get((mid, rel))
-        if not abs_path or not Path(abs_path).is_file():
+        if kind == "thumbnail":
             continue
-        rel_esc = html.escape(rel)
         if kind == "photo":
+            if rel in rendered_photos:
+                continue
+            rendered_photos.add(rel)
+            thumb_rel = photo_thumb_relative(rel)
+            display_rel = thumb_rel
+            display_path = _bundle_file(bundle_dir, thumb_rel, media_map, mid)
+            full_path = _bundle_file(bundle_dir, rel, media_map, mid)
+            if display_path is None:
+                display_rel = rel
+                display_path = full_path
+            if display_path is None:
+                continue
+            href_path = full_path or display_path
+            href_esc = html.escape(href_path.as_uri(), quote=True)
+            src_esc = _image_src_attr(display_path)
             blocks.extend(
                 [
                     "       <div class=\"media_wrap clearfix\">\n",
-                    f"        <a class=\"photo_wrap clearfix pull_left\" href=\"{rel_esc}\">\n",
-                    f"         <img class=\"photo\" src=\"{rel_esc}\" "
+                    f"        <a class=\"photo_wrap clearfix pull_left\" href=\"{href_esc}\">\n",
+                    f"         <img class=\"photo\" src=\"{src_esc}\" "
                     "style=\"width: 260px; height: auto\"/>\n",
                     "        </a>\n",
                     "       </div>\n",
                 ]
             )
+            continue
+        file_path = _bundle_file(bundle_dir, rel, media_map, mid)
+        if file_path is None:
+            continue
+        rel_esc = html.escape(rel)
+        if kind == "sticker" and is_raster_image_path(rel):
+            src_esc = _image_src_attr(file_path)
+            blocks.extend(
+                [
+                    "       <div class=\"media_wrap clearfix\">\n",
+                    f"        <img class=\"sticker\" src=\"{src_esc}\" "
+                    "style=\"max-width: 260px; height: auto\"/>\n",
+                    "       </div>\n",
+                ]
+            )
         elif kind in ("video", "animation", "video_note"):
+            src_esc = html.escape(file_path.as_uri(), quote=True)
             blocks.extend(
                 [
                     "       <div class=\"media_wrap clearfix\">\n",
                     f"        <video class=\"video_file\" controls preload=\"metadata\" "
-                    f"src=\"{rel_esc}\"></video>\n",
+                    f"src=\"{src_esc}\"></video>\n",
                     "       </div>\n",
                 ]
             )
         elif kind in ("voice_message", "audio", "music"):
+            src_esc = html.escape(file_path.as_uri(), quote=True)
             blocks.extend(
                 [
                     "       <div class=\"media_wrap clearfix\">\n",
-                    f"        <audio controls src=\"{rel_esc}\"></audio>\n",
+                    f"        <audio controls src=\"{src_esc}\"></audio>\n",
+                    "       </div>\n",
+                ]
+            )
+        elif is_raster_image_path(rel):
+            src_esc = _image_src_attr(file_path)
+            blocks.extend(
+                [
+                    "       <div class=\"media_wrap clearfix\">\n",
+                    f"        <img class=\"photo\" src=\"{src_esc}\" "
+                    "style=\"max-width: 260px; height: auto\"/>\n",
                     "       </div>\n",
                 ]
             )
@@ -473,6 +576,8 @@ def _format_text_html(raw: Any) -> str:
             parts.append(f"<pre>{escaped}</pre>")
         elif entity_type == "spoiler":
             parts.append(f'<span class="spoiler hidden">{escaped}</span>')
+        elif entity_type in ("custom_emoji", "emoji"):
+            parts.append(f'<span class="emoji">{escaped}</span>')
         else:
             parts.append(escaped)
     return "".join(parts)

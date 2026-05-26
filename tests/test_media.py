@@ -18,6 +18,7 @@ def test_extract_media_refs() -> None:
     kinds = {k for k, _ in refs}
     assert kinds == {"photo", "video_file", "thumbnail"}
     assert ("video_file", "video_files/v.mp4") in refs
+    assert ("thumbnail", "photos/a_thumb.jpg") in refs
 
 
 def test_ingest_indexes_media_on_disk(tmp_path: Path) -> None:

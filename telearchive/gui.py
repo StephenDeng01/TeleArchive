@@ -6,7 +6,6 @@ import shutil
 import sys
 import threading
 import tkinter as tk
-from datetime import datetime
 from pathlib import Path
 from typing import Callable
 from tkinter import filedialog, messagebox, scrolledtext, ttk
@@ -15,10 +14,10 @@ from telearchive import __version__
 from telearchive.coverage import export_coverage, find_id_gaps
 from telearchive.db import Database
 from telearchive.export_chat import export_chat_range
+from telearchive.export_dates import default_datetime_bounds, set_shortcut_range
 from telearchive.html_board import (
     BoardRenderResult,
     render_range_to_cache,
-    set_shortcut_range,
     warmup_all_messages_cache,
 )
 from telearchive.merge import ingest_paths
@@ -147,26 +146,47 @@ class TeleArchiveApp(tk.Tk):
         export_frame = ttk.LabelFrame(left, text="按时间导出（Telegram JSON 格式）", padding=10)
         export_frame.pack(fill=tk.X, **pad)
 
-        self.export_from = tk.StringVar(value="2026-05-01")
-        self.export_to = tk.StringVar(value="2026-05-31")
+        export_from_default, export_to_default = default_datetime_bounds()
+        self.export_from = tk.StringVar(value=export_from_default)
+        self.export_to = tk.StringVar(value=export_to_default)
         self.export_out = tk.StringVar(value=str(default_export_slice_dir().resolve()))
         self.export_chat_id = tk.StringVar(value="")
         self.export_include_media = tk.BooleanVar(value=True)
 
         row1 = ttk.Frame(export_frame)
-        row1.pack(fill=tk.X, pady=(0, 6))
+        row1.pack(fill=tk.X, pady=(0, 4))
         ttk.Label(row1, text="从").pack(side=tk.LEFT)
-        ttk.Entry(row1, textvariable=self.export_from, width=14).pack(
+        ttk.Entry(row1, textvariable=self.export_from, width=20).pack(
             side=tk.LEFT, padx=(4, 12)
         )
         ttk.Label(row1, text="到").pack(side=tk.LEFT)
-        ttk.Entry(row1, textvariable=self.export_to, width=14).pack(
+        ttk.Entry(row1, textvariable=self.export_to, width=20).pack(
             side=tk.LEFT, padx=(4, 12)
         )
         ttk.Label(row1, text="群聊 ID（可空）").pack(side=tk.LEFT)
         ttk.Entry(row1, textvariable=self.export_chat_id, width=16).pack(
             side=tk.LEFT, padx=(4, 0)
         )
+        ttk.Label(
+            export_frame,
+            text="时间格式 YYYY-MM-DD 或 YYYY-MM-DDTHH:MM:SS（UTC+8）",
+            font=("Segoe UI", 8),
+        ).pack(anchor=tk.W, pady=(0, 4))
+
+        export_preset_row = ttk.Frame(export_frame)
+        export_preset_row.pack(fill=tk.X, pady=(0, 6))
+        for label, key in (
+            ("今天", "today"),
+            ("近三天", "3d"),
+            ("近一周", "7d"),
+            ("近一月", "30d"),
+            ("全部消息", "all"),
+        ):
+            ttk.Button(
+                export_preset_row,
+                text=label,
+                command=lambda k=key: self._set_export_shortcut(k),
+            ).pack(side=tk.LEFT, padx=(0, 6))
 
         row2 = ttk.Frame(export_frame)
         row2.pack(fill=tk.X, pady=(0, 6))
@@ -207,15 +227,20 @@ class TeleArchiveApp(tk.Tk):
         # Right: HTML board
         board_frame = ttk.LabelFrame(right, text="聊天看板（HTML 渲染）", padding=10)
         board_frame.pack(fill=tk.BOTH, expand=True)
-        self.board_from = tk.StringVar(value=datetime.now().strftime("%Y-%m-%d"))
-        self.board_to = tk.StringVar(value=datetime.now().strftime("%Y-%m-%d"))
+        board_from_default, board_to_default = default_datetime_bounds()
+        self.board_from = tk.StringVar(value=board_from_default)
+        self.board_to = tk.StringVar(value=board_to_default)
 
         top_row = ttk.Frame(board_frame)
-        top_row.pack(fill=tk.X, pady=(0, 6))
+        top_row.pack(fill=tk.X, pady=(0, 4))
         ttk.Label(top_row, text="从").pack(side=tk.LEFT)
-        ttk.Entry(top_row, textvariable=self.board_from, width=12).pack(side=tk.LEFT, padx=(4, 8))
+        ttk.Entry(top_row, textvariable=self.board_from, width=20).pack(
+            side=tk.LEFT, padx=(4, 8)
+        )
         ttk.Label(top_row, text="到").pack(side=tk.LEFT)
-        ttk.Entry(top_row, textvariable=self.board_to, width=12).pack(side=tk.LEFT, padx=(4, 8))
+        ttk.Entry(top_row, textvariable=self.board_to, width=20).pack(
+            side=tk.LEFT, padx=(4, 8)
+        )
         ttk.Label(top_row, text="群聊ID").pack(side=tk.LEFT)
         ttk.Entry(top_row, textvariable=self.export_chat_id, width=14).pack(side=tk.LEFT, padx=(4, 8))
         self.btn_board_refresh = ttk.Button(top_row, text="刷新预览", command=self._render_board)
@@ -251,7 +276,12 @@ class TeleArchiveApp(tk.Tk):
         self.board_status.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
         if HtmlFrame is not None:
-            self._board_html = HtmlFrame(board_frame, messages_enabled=False)
+            self._board_html = HtmlFrame(
+                board_frame,
+                messages_enabled=False,
+                images_enabled=True,
+                stylesheets_enabled=True,
+            )
             self._board_html.pack(fill=tk.BOTH, expand=True)
         else:
             self._board_html = None
@@ -561,11 +591,30 @@ class TeleArchiveApp(tk.Tk):
 
         self._run_async("正在导出…", worker)
 
-    def _set_board_shortcut(self, name: str) -> None:
+    def _set_time_shortcut(
+        self,
+        name: str,
+        from_var: tk.StringVar,
+        to_var: tk.StringVar,
+        *,
+        refresh_board: bool = False,
+    ) -> None:
         from_text, to_text = set_shortcut_range(name)
-        self.board_from.set(from_text)
-        self.board_to.set(to_text)
-        self._render_board()
+        from_var.set(from_text)
+        to_var.set(to_text)
+        if refresh_board:
+            self._render_board()
+
+    def _set_export_shortcut(self, name: str) -> None:
+        self._set_time_shortcut(name, self.export_from, self.export_to)
+
+    def _set_board_shortcut(self, name: str) -> None:
+        self._set_time_shortcut(
+            name,
+            self.board_from,
+            self.board_to,
+            refresh_board=True,
+        )
 
     def _resolve_board_chat_id(self, db: Database) -> int:
         text = self.export_chat_id.get().strip()
