@@ -19,6 +19,7 @@ hiddenimports = collect_submodules("rich") + collect_submodules("typer") + [
     "telearchive.media",
     "telearchive.coverage",
     "telearchive.settings",
+    "telearchive.paths",
     "telearchive.updater",
     "telearchive.update_dialog",
     "telearchive.notify",

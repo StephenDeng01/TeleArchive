@@ -218,6 +218,8 @@ telearchive export ./export_slice --chat-id 2837935940 --from 2026-05-20 --to 20
 
 图形界面底部提供 **「按时间导出」** 区域，填写起止日期与输出目录即可。
 
+在未指定输出目录时，GUI 默认使用 `E:/tg_export/export_slice`（若不可用则回退并创建 `exports/export_slice`）。
+
 ### 🔔 更新提醒
 
 - 启动图形界面后，会自动检查 [GitHub Releases](https://github.com/StephenDeng01/TeleArchive/releases) 是否有新版本

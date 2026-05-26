@@ -21,6 +21,7 @@ from telearchive.updater import (
     check_for_update,
     should_notify_update,
 )
+from telearchive.paths import default_export_slice_dir
 from telearchive.paths import default_db_path
 
 
@@ -122,7 +123,7 @@ class TeleArchiveApp(tk.Tk):
 
         self.export_from = tk.StringVar(value="2026-05-01")
         self.export_to = tk.StringVar(value="2026-05-31")
-        self.export_out = tk.StringVar(value=str(Path("exports/export_slice").resolve()))
+        self.export_out = tk.StringVar(value=str(default_export_slice_dir().resolve()))
         self.export_chat_id = tk.StringVar(value="")
         self.export_include_media = tk.BooleanVar(value=True)
 

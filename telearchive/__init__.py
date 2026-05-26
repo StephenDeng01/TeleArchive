@@ -1,3 +1,3 @@
 """TeleArchive: merge Telegram Desktop JSON exports into a single database."""
 
-__version__ = "0.4.2"
+__version__ = "0.4.3"

@@ -1,8 +1,8 @@
 {
-  "version": "0.4.2",
-  "tag": "v0.4.2",
-  "title": "TeleArchive v0.4.2",
-  "release_url": "https://github.com/StephenDeng01/TeleArchive/releases/tag/v0.4.2",
-  "download_url": "https://github.com/StephenDeng01/TeleArchive/releases/download/v0.4.2/TeleArchive.exe",
-  "notes": "默认数据库路径改为 E:/tg_chat_history（不可用则回退 data/）。"
+  "version": "0.4.3",
+  "tag": "v0.4.3",
+  "title": "TeleArchive v0.4.3",
+  "release_url": "https://github.com/StephenDeng01/TeleArchive/releases/tag/v0.4.3",
+  "download_url": "https://github.com/StephenDeng01/TeleArchive/releases/download/v0.4.3/TeleArchive.exe",
+  "notes": "GUI 默认导出目录改为 E:/tg_export/export_slice（不可用则回退 exports/export_slice）。"
 }
