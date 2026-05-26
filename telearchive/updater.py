@@ -424,13 +424,17 @@ def _build_windows_updater_script(*, current_exe: Path, new_exe: Path) -> str:
     bak = str(current_exe.with_suffix(current_exe.suffix + ".old"))
     newf = str(new_exe)
     exedir = str(current_exe.parent)
+    log = str(Path(tempfile.gettempdir()) / "telearchive-update" / "update.log")
     return f"""@echo off
 setlocal enabledelayedexpansion
 set "TARGET={exe}"
 set "BACKUP={bak}"
 set "NEWFILE={newf}"
 set "EXEDIR={exedir}"
+set "LOGFILE={log}"
 set /a ATTEMPT=0
+
+echo [%date% %time%] updater started >> "%LOGFILE%"
 
 :wait_and_replace
 timeout /t 1 /nobreak >nul
@@ -440,19 +444,29 @@ if exist "%BACKUP%" del /f /q "%BACKUP%" >nul 2>nul
 if exist "%TARGET%" move /Y "%TARGET%" "%BACKUP%" >nul 2>nul
 if exist "%TARGET%" (
   if !ATTEMPT! lss 120 goto wait_and_replace
+  echo [%date% %time%] replace timeout, restoring backup >> "%LOGFILE%"
   goto fallback_launch_old
 )
 
 move /Y "%NEWFILE%" "%TARGET%" >nul 2>nul
 if exist "%TARGET%" (
-  start "" /D "%EXEDIR%" "%TARGET%"
+  cd /d "%EXEDIR%"
+  powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -LiteralPath '%TARGET%' -WorkingDirectory '%EXEDIR%'" >nul 2>nul
+  if errorlevel 1 (
+    start "" "%TARGET%"
+  )
+  echo [%date% %time%] relaunched %TARGET% >> "%LOGFILE%"
   if exist "%BACKUP%" del /f /q "%BACKUP%" >nul 2>nul
   del /f /q "%~f0" >nul 2>nul
   exit /b 0
 )
 
 :fallback_launch_old
-if exist "%BACKUP%" start "" "%BACKUP%"
+if exist "%BACKUP%" (
+  cd /d "%EXEDIR%"
+  powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -LiteralPath '%BACKUP%' -WorkingDirectory '%EXEDIR%'" >nul 2>nul
+  if errorlevel 1 start "" "%BACKUP%"
+)
 del /f /q "%~f0" >nul 2>nul
 exit /b 1
 """

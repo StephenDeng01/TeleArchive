@@ -603,8 +603,14 @@ class TeleArchiveApp(tk.Tk):
     def _load_board_html(self, result: BoardRenderResult) -> None:
         if self._board_html is None:
             return
-        self._board_html.load_file(str(result.html_path))
-        self._board_loaded_file = result.html_path
+        html_path = result.html_path.resolve()
+        base_url = html_path.parent.as_uri() + "/"
+        try:
+            html_source = html_path.read_text(encoding="utf-8")
+            self._board_html.load_html(html_source, base_url=base_url)
+        except OSError:
+            self._board_html.load_file(str(html_path))
+        self._board_loaded_file = html_path
         source = "缓存命中" if result.cached else "新编译"
         self.board_status.configure(
             text=(
@@ -700,12 +706,14 @@ class TeleArchiveApp(tk.Tk):
                 return
 
             self.after(0, lambda: self._log("更新包已验证并准备替换，应用即将重启…"))
-            self.after(0, self._shutdown_for_restart)
+            # Brief delay so the detached updater can start before the exe is torn down.
+            self.after(400, self._shutdown_for_restart)
 
         self._set_busy(True, "正在下载并更新…")
         threading.Thread(target=task, daemon=True).start()
 
     def _shutdown_for_restart(self) -> None:
+        self.quit()
         self.destroy()
 
 

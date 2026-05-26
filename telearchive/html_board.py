@@ -18,6 +18,8 @@ from telearchive.parser import extract_text
 UTC8 = timezone(timedelta(hours=8))
 ALL_FROM = "1970-01-01"
 ALL_TO = "2099-12-31"
+# Bump when HTML/CSS rendering changes so stale html_cache bundles are rebuilt.
+BOARD_RENDER_VERSION = "r2"
 _MONTHS = (
     "January",
     "February",
@@ -100,7 +102,7 @@ def render_range_to_cache(
         raise ValueError(f"数据库中不存在群聊 id={chat_id}")
     chat_name = str(chat["name"])
 
-    key = f"chat_{chat_id}_{from_ts}_{to_ts}"
+    key = f"chat_{chat_id}_{from_ts}_{to_ts}_{BOARD_RENDER_VERSION}"
     chat_dir = (cache_dir / f"chat_{chat_id}").resolve()
     bundle_dir = chat_dir / key
     json_path = bundle_dir / "board_meta.json"
@@ -142,7 +144,7 @@ def render_range_to_cache(
     _copy_media_files(bundle_dir, messages, media_map)
 
     html_path.write_text(
-        _render_native_html(chat_name, messages, media_map),
+        _render_native_html(chat_name, messages, media_map, bundle_dir),
         encoding="utf-8",
     )
     json_path.write_text(
@@ -228,18 +230,29 @@ def _load_count(path: Path) -> int:
     return 0
 
 
+def _read_bundle_css(bundle_dir: Path) -> str:
+    css_path = bundle_dir / "css" / "style.css"
+    if not css_path.is_file():
+        return ""
+    return css_path.read_text(encoding="utf-8")
+
+
 def _render_native_html(
     chat_name: str,
     messages: list[dict[str, Any]],
     media_map: dict[tuple[int, str], str],
+    bundle_dir: Path,
 ) -> str:
     title = html.escape(chat_name)
     history = _render_history(messages, media_map)
+    css = _read_bundle_css(bundle_dir)
+    style_block = f"  <style>\n{css}\n  </style>\n" if css else ""
     return (
         "<!DOCTYPE html>\n<html>\n <head>\n"
         "  <meta charset=\"utf-8\"/>\n"
         f"<title>{title}</title>\n"
         "  <meta content=\"width=device-width, initial-scale=1.0\" name=\"viewport\"/>\n"
+        f"{style_block}"
         "  <link href=\"css/style.css\" rel=\"stylesheet\"/>\n"
         "  <script src=\"js/script.js\" type=\"text/javascript\">\n  </script>\n"
         " </head>\n"
