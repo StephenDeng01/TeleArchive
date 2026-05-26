@@ -1,0 +1,42 @@
+---
+description: 完成任务后自动 git commit 并 push 到 origin
+alwaysApply: true
+---
+
+# 自动 Commit 与 Push
+
+在本项目中，完成有意义的代码或文档变更后，**必须**自动提交并推送到远程仓库，无需等待用户再次确认。
+
+## 执行时机
+
+- 完成一项功能、修复、文档更新或配置变更后
+- 用户明确要求 commit / push 时立即执行
+- 不要在无变更时创建空 commit
+
+## Git 安全协议
+
+- **禁止**修改 git config
+- **禁止** force push 到 `main` / `master`；若用户要求 force push 须先警告
+- **禁止** `--no-verify`、`--no-gpg-sign` 等跳过 hook 的参数，除非用户明确要求
+- **禁止**提交可能含密钥的文件（`.env`、credentials 等）
+- **禁止** amend 已 push 的 commit，除非用户明确要求
+- 使用 HEREDOC 编写 commit message
+
+## 标准流程
+
+1. 并行执行：`git status`、`git diff`、`git log -3 --oneline`
+2. 撰写 1–2 句 commit message，说明「为什么」
+3. `git add` 相关文件 → `git commit` → `git push origin HEAD`
+4. `git status` 确认工作区干净、推送成功
+
+## Commit Message 风格
+
+与仓库现有风格一致，使用英文或中文均可，例如：
+
+- `docs: polish README with icons and navigation`
+- `fix: commit import records after each ingest batch`
+
+## 例外
+
+- 仅探索、问答、无文件改动：不 commit
+- push 失败时报告错误，不要 force push 修复

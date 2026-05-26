@@ -1,177 +1,263 @@
-# TeleArchive
+<div align="center">
 
-将 **Telegram Desktop** 手动导出的 JSON 聊天记录，按时间顺序合并、去重后写入 **SQLite**，便于后续用 SQL 或 Python 分析群聊内容。
+# 📦 TeleArchive
 
-适用于：无法申请 Bot/API、群消息自动删除、需要定期导出导致**分段且重叠**的场景。
+**Telegram 群聊归档与智能合并工具**
 
-## 前置条件
+将 Telegram Desktop 手动导出的 JSON 记录，去重、拼接并写入本地数据库，形成可持续积累、便于分析的完整聊天档案。
 
-1. 使用 [Telegram Desktop](https://desktop.telegram.org/) **≥ 4.15.2**（支持 JSON 导出）。
-2. 在目标群聊：**右键标题 → Export chat history**，格式选 **JSON**（可不导出媒体以加快速度）。
-3. 每次导出会得到一个文件夹，内含 `result.json` 及媒体子目录（`photos/`、`video_files/` 等）。**JSON 里只有相对路径，图片/视频本体在同级目录中。**
+<br>
 
-## 安装
+[![Release](https://img.shields.io/github/v/release/StephenDeng01/TeleArchive?style=flat-square&logo=github&label=Release)](https://github.com/StephenDeng01/TeleArchive/releases)
+[![Python](https://img.shields.io/badge/Python-3.9+-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
+[![SQLite](https://img.shields.io/badge/Storage-SQLite-003B57?style=flat-square&logo=sqlite&logoColor=white)](https://www.sqlite.org/)
+[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-555?style=flat-square&logo=windows&logoColor=white)]()
 
-```bash
-cd TeleArchive
-python3 -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -e ".[dev]"
-```
+[🚀 快速开始](#-快速开始) · [🪟 Windows 下载](#-windows-用户) · [⚙️ 工作原理](#️-工作原理) · [📊 数据分析](#-数据分析) · [🛠 参与开发](#-参与开发)
 
-## 使用
+<br>
 
-```bash
-# 初始化数据库（也可在首次 ingest 时自动创建）
-telearchive init
+</div>
 
-# 导入一次或多次导出（目录或 result.json 均可，支持多个路径）
-telearchive ingest ~/Downloads/ChatExport_2026-05-20
-telearchive ingest ~/Downloads/ChatExport_2026-05-26
+---
 
-# 导入父文件夹（自动发现其下所有 ChatExport_*）
-telearchive ingest "Telegram Desktop(1)"
+## 📋 概述
 
-# 查看合并统计与 id 空洞（自动删消息造成的缺口）
-telearchive status
-telearchive gaps --min-gap 10
-```
+TeleArchive 面向 **无法使用 Telegram Bot / 官方 API**，但仍需长期留存与分析群聊内容的场景。当群组启用消息自动删除、或需定期手动导出时，历史记录往往被拆成多段、且批次之间存在重叠。
 
-默认数据库路径：`data/telearchive.db`。
+本工具在本地完成以下工作：
 
-自定义路径：
+| | 能力 |
+|---|---|
+| 🔀 | **合并**多批次 `result.json`，按消息 ID 去重，形成时间有序的完整时间线 |
+| 🛡️ | **保留**较新导出中已消失、但旧导出仍保留的消息（并集策略） |
+| 🖼️ | **索引**图片、视频等媒体文件的磁盘路径，并识别跨批次重命名的同一附件 |
+| 🗄️ | **输出**标准 SQLite 数据库，支持 SQL、Python、pandas 等任意分析方式 |
 
-```bash
-telearchive --db /path/to/my.db ingest ./exports/batch1
-```
+🔒 全程离线运行，数据不离开本机。
 
-## 合并原理
+---
 
-| 问题 | 处理方式 |
-|------|----------|
-| 多段导出重叠 | 以 `(chat_id, message_id)` 为主键去重；Telegram 在单聊内 message id 唯一 |
-| 消息被编辑 | 若新导出带更新的 `edited_unixtime` 或内容变化，则更新记录 |
-| 顺序 | 库内按 `date_unixtime`, `message_id` 索引，查询时 `ORDER BY` 即可 |
-| 原始字段 | `raw_json` 保留完整消息 JSON，便于扩展分析 |
-| 图片/视频 | JSON 仅存相对路径；入库时写入 `media_locations`，并按内容 hash 合并不同导出里重命名的同一文件；查询用 `message_media.preferred_absolute_path` |
-| 自动删消息 | **并集合并**：较新导出更短时，较早导出里独有的消息仍会保留 |
-| 导出批次 | 传入父文件夹可一次导入多个 `ChatExport_*`；按消息时间从旧到新合并 |
+## 🎯 适用场景
 
-### JSON 与媒体文件的关系
+| 场景 | 说明 |
+|------|------|
+| ⏳ 群消息 TTL 自动删除 | 定期导出，合并后尽可能还原完整历史 |
+| 🚫 无法申请 API | 仅依赖 Telegram Desktop 官方导出能力 |
+| 📂 分段导出、内容重叠 | 自动去重，避免重复计数 |
+| 🔍 群聊研究与复盘 | 结构化入库，便于统计、检索与关联分析 |
 
-Telegram 导出结构示例：
+---
+
+## ✨ 特性
+
+- 🔗 **并集合并** — 新导出更短时，不丢弃旧导出独有的消息
+- 🔑 **稳定去重** — 以 `(chat_id, message_id)` 为唯一键，与 Telegram 导出规范一致
+- 📎 **媒体感知** — 解析 JSON 相对路径，校验文件存在，按内容哈希关联跨批次附件
+- 🧭 **批次可追溯** — 记录每条消息的首次来源导出与导入历史
+- 🕳️ **缺口分析** — `gaps` 命令识别 message ID 序列空洞，辅助判断删消息区间
+- 📥 **开箱即用** — 提供 Windows 单文件可执行程序，亦可通过 pip 安装
+
+---
+
+## 🚀 快速开始
+
+### 📌 环境要求
+
+- [Telegram Desktop](https://desktop.telegram.org/) **≥ 4.15.2**（支持 JSON 格式导出）
+- Python **3.9+**（源码安装时）
+
+### 📤 导出聊天记录
+
+在目标群聊中：**右键聊天标题 → Export chat history**
+
+- 格式选择 **JSON**
+- 可按需限制媒体体积（仅分析文本时可设为 0 MB 以加快速度）
+
+每次导出将生成一个独立文件夹，例如：
 
 ```
 ChatExport_2026-05-26/
-├── result.json          # 消息元数据 + 媒体相对路径
+├── result.json
 ├── photos/
 ├── video_files/
-├── voice_messages/
 └── stickers/
 ```
 
-`result.json` 中一条带图消息可能类似：
+> 💡 **说明**：`result.json` 仅包含消息元数据与媒体**相对路径**；实际文件存放于同级子目录中。导入时请提供**完整导出文件夹**，而非单独的 JSON 文件。
 
-```json
-{
-  "id": 42,
-  "type": "message",
-  "photo": "photos/photo_3@26-05-2026_12-00-00.jpg",
-  "width": "1280",
-  "height": "720"
-}
+### 📥 安装
+
+**方式 A — 从源码安装（推荐开发者）**
+
+```bash
+git clone https://github.com/StephenDeng01/TeleArchive.git
+cd TeleArchive
+python3 -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+pip install -e .
 ```
 
-导入时以 **`result.json` 所在目录** 为 `export_root`，将 `export_root + photo` 解析为磁盘上的绝对路径。`ingest` 必须传入**整个导出文件夹**（或其中的 `result.json`），不能只拷贝 JSON 而丢掉旁边的 `photos/` 等目录。
+**方式 B — Windows 可执行文件**
 
-多次导出时，同一条消息的相对路径字符串通常相同，但文件在不同日期的导出目录里；工具会记录 `export_root`，并在磁盘上找不到文件时，尽量保留上一次仍能访问的路径。
+前往 [Releases](https://github.com/StephenDeng01/TeleArchive/releases) 下载 `telearchive.exe`，无需安装 Python。详见 [Windows 用户](#-windows-用户)。
 
-**注意**：导出时若把「媒体大小限制」设为 0 MB，JSON 里可能只有占位说明、没有真实文件，此时 `file_exists=0` 属正常情况。
+### ⌨️ 基本用法
 
-## 分析示例（SQL）
+```bash
+# 初始化本地数据库
+telearchive init
+
+# 导入单批导出
+telearchive ingest ~/Downloads/ChatExport_2026-05-20
+
+# 导入多批导出（自动按时间从旧到新合并）
+telearchive ingest ~/Downloads/ChatExport_2026-05-20 ~/Downloads/ChatExport_2026-05-26
+
+# 导入父目录（自动发现其下全部 ChatExport_* 文件夹）
+telearchive ingest "./Telegram Desktop(1)"
+
+# 查看合并结果
+telearchive status
+
+# 分析 message ID 空洞（通常对应已自动删除的消息）
+telearchive gaps --min-gap 10
+```
+
+默认数据库路径：`data/telearchive.db`
+
+```bash
+telearchive ingest --db /path/to/archive.db ./exports/batch1
+```
+
+---
+
+## ⚙️ 工作原理
+
+```mermaid
+flowchart LR
+    A["📱 Telegram Desktop<br/>JSON 导出"] --> B["📥 telearchive ingest"]
+    B --> C{"🔀 去重与合并"}
+    C --> D[("🗄️ SQLite")]
+    D --> E["📊 SQL / Python / BI"]
+
+    subgraph 合并策略
+        C1["🔑 message_id"]
+        C2["🛡️ 并集保留"]
+        C3["🖼️ 媒体哈希"]
+    end
+
+    C --> C1
+    C --> C2
+    C --> C3
+```
+
+| 维度 | 策略 |
+|------|------|
+| 🔑 消息去重 | `(chat_id, message_id)` 主键；单群内 ID 唯一 |
+| 🔀 重叠批次 | 取并集；较新导出缺失的消息由较早导出补充 |
+| ✏️ 消息编辑 | 依据 `edited_unixtime` 或内容变更更新记录 |
+| 🕐 时间排序 | `date_unixtime` + `message_id` 联合索引 |
+| 📄 原始数据 | `raw_json` 字段保留完整导出条目 |
+| 🖼️ 媒体文件 | 写入 `media_locations`；`message_media` 提供首选访问路径 |
+| 📅 导入顺序 | 多批次按消息时间**从旧到新**依次合并 |
+
+### 📎 媒体文件说明
+
+Telegram 在不同导出批次中可能对同一附件使用不同文件名（如 `photo_27@...` 与 `photo_1@...`）。TeleArchive 通过 **文件内容哈希** 识别等价附件，并在 `media_locations` 中保留各批次的实际路径。
+
+查询时建议使用：
+
+```sql
+SELECT preferred_absolute_path FROM message_media WHERE ...;
+```
+
+---
+
+## 📟 命令参考
+
+| 命令 | 说明 |
+|------|------|
+| `telearchive init` | 🗄️ 初始化数据库表结构 |
+| `telearchive ingest <路径…>` | 📥 导入并合并一个或多个导出目录 / `result.json` |
+| `telearchive status` | 📊 查看群聊消息统计、媒体索引与导入历史 |
+| `telearchive gaps` | 🕳️ 分析 message ID 序列空洞与各批次覆盖情况 |
+| `telearchive version` | ℹ️ 显示当前版本 |
+
+全局选项：`--db <路径>` 指定数据库文件（默认 `data/telearchive.db`）。
+
+---
+
+## 📊 数据分析
+
+数据库为标准 SQLite，可使用任意客户端或脚本访问。
 
 ```bash
 sqlite3 data/telearchive.db
 ```
 
 ```sql
--- 某群最近 50 条文本消息
-SELECT datetime(date_unixtime, 'unixepoch') AS t,
-       from_name, text
+-- 最近 50 条文本消息
+SELECT datetime(date_unixtime, 'unixepoch') AS time,
+       from_name,
+       text
 FROM messages
-WHERE chat_id = -1001234567890 AND text IS NOT NULL
+WHERE chat_id = :chat_id
+  AND text IS NOT NULL
 ORDER BY date_unixtime DESC
 LIMIT 50;
 
--- 按发送者统计条数
-SELECT from_name, COUNT(*) AS n
+-- 按成员统计发言量
+SELECT from_name, COUNT(*) AS count
 FROM messages
-WHERE chat_id = -1001234567890 AND msg_type = 'message'
+WHERE chat_id = :chat_id
+  AND msg_type = 'message'
 GROUP BY from_id
-ORDER BY n DESC;
+ORDER BY count DESC;
 
--- 带图片且文件仍在磁盘上的消息（首选路径）
-SELECT m.date_iso, m.from_name, mm.preferred_absolute_path
+-- 带图片且文件仍存在于磁盘
+SELECT m.date_iso,
+       m.from_name,
+       mm.preferred_absolute_path
 FROM messages m
-JOIN message_media mm ON mm.chat_id = m.chat_id AND mm.message_id = m.message_id
-WHERE m.chat_id = -1001234567890
+JOIN message_media mm
+  ON mm.chat_id = m.chat_id
+ AND mm.message_id = m.message_id
+WHERE m.chat_id = :chat_id
   AND mm.media_kind = 'photo'
 ORDER BY m.date_unixtime DESC
 LIMIT 20;
-
--- 同一附件在不同导出批次下的全部路径
-SELECT relative_path, absolute_path, file_exists
-FROM media_locations
-WHERE chat_id = -1001234567890 AND message_id = 218281;
 ```
 
-也可用 pandas：`pd.read_sql("SELECT ...", sqlite3.connect("data/telearchive.db"))`。
+Python 示例：
 
-## 推荐工作流
+```python
+import sqlite3
+import pandas as pd
 
-1. 固定导出目录，例如 `~/TeleArchive/exports/`，每次导出用日期命名子文件夹。
-2. 每周或每天导出后执行：`telearchive ingest ~/TeleArchive/exports/*`
-3. 用 `status` 确认消息总数与时间范围是否连续变长。
-
-## Windows 可执行文件
-
-无需安装 Python，使用单个 `telearchive.exe` 即可。
-
-### 方式一：GitHub Release 下载（推荐，无需 Windows）
-
-1. 打开仓库 [Releases](https://github.com/StephenDeng01/TeleArchive/releases) 页面。
-2. 下载最新版 **`telearchive.exe`** 即可使用。
-
-维护者发布新版本：
-
-```bash
-git tag v0.1.0
-git push origin v0.1.0
+conn = sqlite3.connect("data/telearchive.db")
+df = pd.read_sql("SELECT * FROM messages WHERE chat_id = ?", conn, params=(chat_id,))
 ```
 
-或在 GitHub **Actions → Build Windows exe → Run workflow**，勾选发布 Release，填写标签（如 `v0.1.0`），构建完成后 exe 会自动出现在 Releases 页面。
+---
 
-### 方式二：GitHub Actions 手动构建（仅下载 Artifact）
+## 🔄 推荐工作流
 
-1. 打开 **Actions → Build Windows exe → Run workflow**。
-2. 若不需要 Release，将「发布到 GitHub Release」设为 false。
-3. 在 **Artifacts** 下载 `telearchive-windows-x64`。
+1. 📁 **固定目录** — 例如 `~/TeleArchive/exports/`，每次导出以日期命名子文件夹
+2. 🔁 **定期导入** — `telearchive ingest ~/TeleArchive/exports/*`
+3. ✅ **核对增量** — `telearchive status` 确认消息总数与时间跨度持续扩展
+4. 💾 **保留原始导出** — 数据库记录的是路径引用，请勿删除仍被索引的导出文件夹
 
-### 方式三：在 Windows 本机构建
+---
 
-需要 [Python 3.9+](https://www.python.org/downloads/)（仅构建时用）。
+## 🪟 Windows 用户
 
-```powershell
-git clone https://github.com/StephenDeng01/TeleArchive.git
-cd TeleArchive
-.\scripts\build_windows.ps1
-```
+### ⬇️ 下载
 
-产物：`dist\telearchive.exe`（约 15–25 MB，单文件、免安装）。
+1. 打开 [Releases](https://github.com/StephenDeng01/TeleArchive/releases)
+2. 下载最新版 **`telearchive.exe`**（单文件，免安装，约 15–25 MB）
 
-### Windows 使用示例
-
-在 PowerShell 或 CMD 中，于 exe 所在目录或将其加入 PATH：
+### 💻 使用示例
 
 ```powershell
 .\telearchive.exe init
@@ -181,18 +267,61 @@ cd TeleArchive
 .\telearchive.exe gaps --min-gap 10
 ```
 
-数据库默认写在当前工作目录的 `data\telearchive.db`。可指定路径：
+指定数据库路径：
 
 ```powershell
 .\telearchive.exe ingest --db D:\TeleArchive\archive.db "D:\exports\batch1"
 ```
 
-## 开发
+### 🔨 自行构建
+
+```powershell
+git clone https://github.com/StephenDeng01/TeleArchive.git
+cd TeleArchive
+.\scripts\build_windows.ps1
+# 输出: dist\telearchive.exe
+```
+
+### 🚢 发布新版本（维护者）
 
 ```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+推送 `v*` 标签后，GitHub Actions 将自动构建 Windows 可执行文件并发布至 Releases。亦可于 **Actions → Build Windows exe** 手动触发工作流。
+
+---
+
+## 🛠 参与开发
+
+```bash
+pip install -e ".[dev]"
 pytest
 ```
 
-## 参考
+构建 Windows 安装包依赖：
 
-- [Telegram Data Export Schema](https://core.telegram.org/import-export)
+```bash
+pip install -e ".[build]"
+pyinstaller telearchive.spec
+```
+
+---
+
+## 📚 参考
+
+- 📄 [Telegram Data Export Schema](https://core.telegram.org/import-export) — 官方 JSON 导出字段说明
+- 💬 [Telegram Desktop](https://desktop.telegram.org/) — 客户端下载
+
+---
+
+<div align="center">
+
+**📦 TeleArchive** — 让分散的聊天导出，成为可追溯、可分析的完整档案。
+
+<br>
+
+💬 如有问题或建议，欢迎提交 [Issue](https://github.com/StephenDeng01/TeleArchive/issues)。
+
+</div>
