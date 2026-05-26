@@ -1,12 +1,18 @@
-"""Check for new releases on GitHub (optional, user-initiated or reminder)."""
+"""Check for new releases and optionally perform in-app update on Windows."""
 
 from __future__ import annotations
 
 import json
+import hashlib
+import os
+import subprocess
+import tempfile
 import re
+import sys
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from telearchive import __version__
@@ -35,6 +41,7 @@ class ReleaseInfo:
     url: str
     notes: str
     download_url: str | None
+    sha256: str | None = None
 
 
 @dataclass(frozen=True)
@@ -143,6 +150,12 @@ def _release_from_payload(payload: dict[str, Any]) -> ReleaseInfo:
                 download_url = str(asset.get("browser_download_url") or "") or None
                 break
 
+    sha256 = payload.get("sha256")
+    if isinstance(sha256, str):
+        sha256 = sha256.strip().lower() or None
+    else:
+        sha256 = None
+
     if not version:
         raise ValueError("Release metadata incomplete")
 
@@ -153,6 +166,7 @@ def _release_from_payload(payload: dict[str, Any]) -> ReleaseInfo:
         url=url,
         notes=notes,
         download_url=download_url,
+        sha256=sha256,
     )
 
 
@@ -239,3 +253,116 @@ def dismiss_update_reminder(version: str) -> None:
 
 def should_notify_update(result: UpdateCheckResult) -> bool:
     return result.has_update and not result.is_dismissed
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as f:
+        while True:
+            chunk = f.read(1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _download_file(url: str, target: Path, *, timeout: float = 30.0) -> None:
+    request = urllib.request.Request(
+        url,
+        headers={
+            "Accept": "application/octet-stream",
+            "User-Agent": USER_AGENT,
+        },
+    )
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        with target.open("wb") as out:
+            while True:
+                chunk = response.read(1024 * 1024)
+                if not chunk:
+                    break
+                out.write(chunk)
+
+
+def perform_in_app_update(release: ReleaseInfo) -> None:
+    """
+    Download, verify SHA256, replace executable, and relaunch (Windows only).
+
+    This function is intended for frozen executable distribution.
+    """
+    if os.name != "nt":
+        raise RuntimeError("仅 Windows 桌面版支持“立即更新”。")
+    if not getattr(sys, "frozen", False):
+        raise RuntimeError("当前为源码运行模式，无法自替换可执行文件。")
+    if not release.download_url:
+        raise RuntimeError("该版本未提供下载地址。")
+    if not release.sha256:
+        raise RuntimeError("该版本未提供 sha256，已阻止自动更新以保证安全。")
+
+    current_exe = Path(sys.executable).resolve()
+    staging_dir = Path(tempfile.gettempdir()) / "telearchive-update"
+    new_exe = staging_dir / f"TeleArchive-{release.version}.exe"
+    _download_file(release.download_url, new_exe)
+
+    actual_hash = _sha256_file(new_exe)
+    if actual_hash != release.sha256.lower():
+        raise RuntimeError(
+            "更新包 SHA256 校验失败，已取消更新。"
+            f"\n期望: {release.sha256}\n实际: {actual_hash}"
+        )
+
+    updater_bat = staging_dir / "apply_update.bat"
+    updater_bat.write_text(
+        _build_windows_updater_script(
+            current_exe=current_exe,
+            new_exe=new_exe,
+        ),
+        encoding="utf-8",
+    )
+
+    # Detached updater process: wait current app exit, replace exe, relaunch.
+    CREATE_NO_WINDOW = 0x08000000
+    DETACHED_PROCESS = 0x00000008
+    subprocess.Popen(
+        ["cmd", "/c", str(updater_bat)],
+        creationflags=CREATE_NO_WINDOW | DETACHED_PROCESS,
+        close_fds=True,
+        cwd=str(staging_dir),
+    )
+
+
+def _build_windows_updater_script(*, current_exe: Path, new_exe: Path) -> str:
+    exe = str(current_exe)
+    bak = str(current_exe.with_suffix(current_exe.suffix + ".old"))
+    newf = str(new_exe)
+    return f"""@echo off
+setlocal enabledelayedexpansion
+set "TARGET={exe}"
+set "BACKUP={bak}"
+set "NEWFILE={newf}"
+set /a ATTEMPT=0
+
+:wait_and_replace
+timeout /t 1 /nobreak >nul
+set /a ATTEMPT+=1
+
+if exist "%BACKUP%" del /f /q "%BACKUP%" >nul 2>nul
+if exist "%TARGET%" move /Y "%TARGET%" "%BACKUP%" >nul 2>nul
+if exist "%TARGET%" (
+  if !ATTEMPT! lss 120 goto wait_and_replace
+  goto fallback_launch_old
+)
+
+move /Y "%NEWFILE%" "%TARGET%" >nul 2>nul
+if exist "%TARGET%" (
+  start "" "%TARGET%"
+  if exist "%BACKUP%" del /f /q "%BACKUP%" >nul 2>nul
+  del /f /q "%~f0" >nul 2>nul
+  exit /b 0
+)
+
+:fallback_launch_old
+if exist "%BACKUP%" start "" "%BACKUP%"
+del /f /q "%~f0" >nul 2>nul
+exit /b 1
+"""

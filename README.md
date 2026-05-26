@@ -224,9 +224,12 @@ telearchive export ./export_slice --chat-id 2837935940 --from 2026-05-20 --to 20
 
 - 启动图形界面后，会自动检查 [GitHub Releases](https://github.com/StephenDeng01/TeleArchive/releases) 是否有新版本
 - **不强制更新**：可继续使用当前版本
+- **立即更新（Windows）**：下载新版本后执行 SHA256 校验，通过后静默替换并自动重启
 - **稍后提醒**：关闭对话框，下次启动仍会提示
 - **不再提示此版本**：仅忽略当前最新版；发布更新的版本后会再次提醒
 - 偏好保存在 `data/settings.json`
+
+`version.json` 中包含 `sha256` 字段；应用仅在存在且校验通过时执行“立即更新”。
 
 命令行手动检查：
 

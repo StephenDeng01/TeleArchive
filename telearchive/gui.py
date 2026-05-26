@@ -17,8 +17,10 @@ from telearchive.merge import ingest_paths
 from telearchive.notify import notify_update_available
 from telearchive.update_dialog import UpdateDialog
 from telearchive.updater import (
+    ReleaseInfo,
     UpdateCheckResult,
     check_for_update,
+    perform_in_app_update,
     should_notify_update,
 )
 from telearchive.paths import default_export_slice_dir
@@ -501,7 +503,33 @@ class TeleArchiveApp(tk.Tk):
             result.latest,
             result.current_version,
             on_later=lambda: None,
+            on_update_now=lambda: self._update_now(result.latest),
         )
+
+    def _update_now(self, release: ReleaseInfo) -> None:
+        if self._busy:
+            return
+
+        def task() -> None:
+            try:
+                perform_in_app_update(release)
+            except RuntimeError as exc:
+                self.after(0, lambda: messagebox.showwarning("立即更新", str(exc)))
+                self.after(0, lambda: self._set_busy(False, "就绪"))
+                return
+            except Exception as exc:  # noqa: BLE001
+                self.after(0, lambda: messagebox.showerror("立即更新失败", str(exc)))
+                self.after(0, lambda: self._set_busy(False, "就绪"))
+                return
+
+            self.after(0, lambda: self._log("更新包已验证并准备替换，应用即将重启…"))
+            self.after(0, self._shutdown_for_restart)
+
+        self._set_busy(True, "正在下载并更新…")
+        threading.Thread(target=task, daemon=True).start()
+
+    def _shutdown_for_restart(self) -> None:
+        self.destroy()
 
 
 def should_launch_gui(argv: list[str] | None = None) -> bool:

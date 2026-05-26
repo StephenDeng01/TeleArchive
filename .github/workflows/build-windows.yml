@@ -36,20 +36,25 @@ jobs:
           python -m pip install --upgrade pip
           pip install ".[build]"
           pyinstaller --noconfirm --clean telearchive.spec
+          certutil -hashfile dist\TeleArchive.exe SHA256 | findstr /R /C:"^[0-9A-F][0-9A-F]" > dist\TeleArchive.exe.sha256
           dir dist
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: telearchive-windows-x64
-          path: dist/TeleArchive.exe
+          path: |
+            dist/TeleArchive.exe
+            dist/TeleArchive.exe.sha256
           retention-days: 90
 
       - name: Publish GitHub Release (tag push)
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/TeleArchive.exe
+          files: |
+            dist/TeleArchive.exe
+            dist/TeleArchive.exe.sha256
           generate_release_notes: true
 
       - name: Update version.json
@@ -60,15 +65,18 @@ jobs:
           export TAG="${GITHUB_REF_NAME}"
           python - <<'PY'
           import json, os
+          from pathlib import Path
           version = os.environ["VERSION"].removeprefix("v")
           tag = os.environ["TAG"]
           owner, repo = "StephenDeng01", "TeleArchive"
+          sha = Path("dist/TeleArchive.exe.sha256").read_text(encoding="utf-8").strip().lower()
           doc = {
               "version": version,
               "tag": tag,
               "title": f"TeleArchive {tag}",
               "release_url": f"https://github.com/{owner}/{repo}/releases/tag/{tag}",
               "download_url": f"https://github.com/{owner}/{repo}/releases/download/{tag}/TeleArchive.exe",
+              "sha256": sha,
               "notes": "",
           }
           with open("version.json", "w", encoding="utf-8") as f:
@@ -95,5 +103,7 @@ jobs:
         with:
           tag_name: ${{ inputs.tag }}
           name: TeleArchive ${{ inputs.tag }}
-          files: dist/TeleArchive.exe
+          files: |
+            dist/TeleArchive.exe
+            dist/TeleArchive.exe.sha256
           generate_release_notes: true

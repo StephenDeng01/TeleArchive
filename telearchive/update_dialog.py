@@ -18,6 +18,7 @@ class UpdateDialog(tk.Toplevel):
         current_version: str,
         *,
         on_later: Callable[[], None] | None = None,
+        on_update_now: Callable[[], None] | None = None,
     ) -> None:
         super().__init__(master)
         self.title("发现新版本")
@@ -27,6 +28,7 @@ class UpdateDialog(tk.Toplevel):
 
         self._release = release
         self._on_later = on_later
+        self._on_update_now = on_update_now
 
         frame = ttk.Frame(self, padding=16)
         frame.pack(fill=tk.BOTH, expand=True)
@@ -59,8 +61,9 @@ class UpdateDialog(tk.Toplevel):
         buttons = ttk.Frame(frame)
         buttons.pack(fill=tk.X)
 
-        ttk.Button(buttons, text="前往下载", command=self._open_download).pack(
-            side=tk.RIGHT
+        ttk.Button(buttons, text="前往下载", command=self._open_download).pack(side=tk.RIGHT)
+        ttk.Button(buttons, text="立即更新", command=self._update_now).pack(
+            side=tk.RIGHT, padx=(0, 8)
         )
         ttk.Button(buttons, text="稍后提醒", command=self._later).pack(
             side=tk.RIGHT, padx=(0, 8)
@@ -83,6 +86,11 @@ class UpdateDialog(tk.Toplevel):
     def _open_download(self) -> None:
         target = self._release.download_url or self._release.url
         webbrowser.open(target)
+        self.destroy()
+
+    def _update_now(self) -> None:
+        if self._on_update_now:
+            self._on_update_now()
         self.destroy()
 
     def _later(self) -> None:

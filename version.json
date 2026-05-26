@@ -1,8 +1,9 @@
 {
-  "version": "0.4.3",
-  "tag": "v0.4.3",
-  "title": "TeleArchive v0.4.3",
-  "release_url": "https://github.com/StephenDeng01/TeleArchive/releases/tag/v0.4.3",
-  "download_url": "https://github.com/StephenDeng01/TeleArchive/releases/download/v0.4.3/TeleArchive.exe",
-  "notes": "GUI 默认导出目录改为 E:/tg_export/export_slice（不可用则回退 exports/export_slice）。"
+  "version": "0.5.0",
+  "tag": "v0.5.0",
+  "title": "TeleArchive v0.5.0",
+  "release_url": "https://github.com/StephenDeng01/TeleArchive/releases/tag/v0.5.0",
+  "download_url": "https://github.com/StephenDeng01/TeleArchive/releases/download/v0.5.0/TeleArchive.exe",
+  "sha256": "",
+  "notes": "新增应用内立即更新：下载、SHA256 校验、静默替换并自动重启（Windows）。"
 }
