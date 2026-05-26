@@ -13,7 +13,7 @@ _tg_assets = Path(telearchive.__file__).resolve().parent / "assets" / "tg_export
 hiddenimports = (
     collect_submodules("rich")
     + collect_submodules("typer")
-    + collect_submodules("tkinterweb")
+    + collect_submodules("webview")
     + [
     "click",
     "shellingham",
@@ -35,6 +35,7 @@ hiddenimports = (
     "telearchive.export_dates",
     "telearchive.export_chat",
     "telearchive.html_board",
+    "telearchive.board_browser",
 ]
 )
 
@@ -46,6 +47,7 @@ a = Analysis(
     + [
         (str(_tg_assets / "css"), "telearchive/assets/tg_export/css"),
         (str(_tg_assets / "js"), "telearchive/assets/tg_export/js"),
+        (str(_tg_assets / "images"), "telearchive/assets/tg_export/images"),
     ],
     hiddenimports=hiddenimports,
     hookspath=[],

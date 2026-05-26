@@ -21,6 +21,17 @@ def test_extract_media_refs() -> None:
     assert ("thumbnail", "photos/a_thumb.jpg") in refs
 
 
+def test_sticker_file_refs() -> None:
+    msg = {
+        "id": 3,
+        "file": "stickers/sticker.webp",
+        "media_type": "sticker",
+    }
+    refs = extract_media_refs(msg)
+    assert ("sticker", "stickers/sticker.webp") in refs
+    assert ("thumbnail", "stickers/sticker_thumb.webp") in refs
+
+
 def test_ingest_indexes_media_on_disk(tmp_path: Path) -> None:
     export_dir = tmp_path / "export"
     photos = export_dir / "photos"

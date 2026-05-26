@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import base64
 import html
 import json
-import mimetypes
 import shutil
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -18,12 +16,12 @@ from telearchive.media import (
     extract_media_refs,
     is_raster_image_path,
     photo_thumb_relative,
+    sticker_thumb_relative,
 )
 from telearchive.parser import extract_text
 
 # Bump when HTML/CSS rendering changes so stale html_cache bundles are rebuilt.
-BOARD_RENDER_VERSION = "r3"
-_MAX_EMBED_BYTES = 3 * 1024 * 1024
+BOARD_RENDER_VERSION = "r4"
 _MONTHS = (
     "January",
     "February",
@@ -151,11 +149,12 @@ def _tg_assets_root() -> Path:
 
 def _install_tg_assets(bundle_dir: Path) -> None:
     src = _tg_assets_root()
-    for sub in ("css", "js"):
+    for sub in ("css", "js", "images"):
         dest = bundle_dir / sub
         if dest.exists():
             shutil.rmtree(dest)
-        shutil.copytree(src / sub, dest)
+        if (src / sub).is_dir():
+            shutil.copytree(src / sub, dest)
 
 
 def _copy_media_files(
@@ -175,18 +174,7 @@ def _copy_media_files(
             src = media_map.get((int(mid), rel))
             if not src:
                 if kind == "thumbnail":
-                    for _k, photo_rel in extract_media_refs(msg):
-                        if _k != "photo":
-                            continue
-                        photo_src = media_map.get((int(mid), photo_rel))
-                        if not photo_src:
-                            continue
-                        thumb_src = Path(photo_src).parent / Path(
-                            photo_thumb_relative(photo_rel)
-                        ).name
-                        if thumb_src.is_file():
-                            src = str(thumb_src)
-                        break
+                    src = _resolve_thumb_source(int(mid), rel, msg, media_map)
                 if not src:
                     continue
             src_path = Path(src)
@@ -211,11 +199,31 @@ def _load_count(path: Path) -> int:
     return 0
 
 
-def _read_bundle_css(bundle_dir: Path) -> str:
-    css_path = bundle_dir / "css" / "style.css"
-    if not css_path.is_file():
-        return ""
-    return css_path.read_text(encoding="utf-8")
+def _resolve_thumb_source(
+    mid: int,
+    thumb_rel: str,
+    msg: dict[str, Any],
+    media_map: dict[tuple[int, str], str],
+) -> str | None:
+    src = media_map.get((mid, thumb_rel))
+    if src and Path(src).is_file():
+        return src
+    for _kind, rel in extract_media_refs(msg):
+        if _kind == "photo":
+            photo_src = media_map.get((mid, rel))
+            if not photo_src:
+                continue
+            candidate = Path(photo_src).parent / Path(photo_thumb_relative(rel)).name
+            if candidate.is_file():
+                return str(candidate)
+        elif _kind == "sticker":
+            sticker_src = media_map.get((mid, rel))
+            if not sticker_src:
+                continue
+            candidate = Path(sticker_src).parent / Path(sticker_thumb_relative(rel)).name
+            if candidate.is_file():
+                return str(candidate)
+    return None
 
 
 def _render_native_html(
@@ -226,14 +234,11 @@ def _render_native_html(
 ) -> str:
     title = html.escape(chat_name)
     history = _render_history(messages, media_map, bundle_dir)
-    css = _read_bundle_css(bundle_dir)
-    style_block = f"  <style>\n{css}\n  </style>\n" if css else ""
     return (
         "<!DOCTYPE html>\n<html>\n <head>\n"
         "  <meta charset=\"utf-8\"/>\n"
         f"<title>{title}</title>\n"
         "  <meta content=\"width=device-width, initial-scale=1.0\" name=\"viewport\"/>\n"
-        f"{style_block}"
         "  <link href=\"css/style.css\" rel=\"stylesheet\"/>\n"
         "  <script src=\"js/script.js\" type=\"text/javascript\">\n  </script>\n"
         " </head>\n"
@@ -374,40 +379,28 @@ def _render_default_message(
     return "".join(lines)
 
 
-def _bundle_file(bundle_dir: Path, rel: str, media_map: dict[tuple[int, str]], mid: int) -> Path | None:
-    local = bundle_dir / rel
-    if local.is_file():
-        return local
+def _bundle_has_file(bundle_dir: Path, rel: str, media_map: dict[tuple[int, str]], mid: int) -> bool:
+    if (bundle_dir / rel).is_file():
+        return True
     remote = media_map.get((mid, rel))
-    if remote and Path(remote).is_file():
-        return Path(remote)
-    return None
+    return bool(remote and Path(remote).is_file())
 
 
-def _image_src_attr(path: Path) -> str:
-    embedded = _embed_image_data_uri(path)
-    if embedded:
-        return embedded
-    return html.escape(path.as_uri(), quote=True)
-
-
-def _embed_image_data_uri(path: Path) -> str | None:
-    if not path.is_file() or not is_raster_image_path(path.name):
-        return None
+def _media_style(msg: dict[str, Any], *, max_px: int = 260) -> str:
     try:
-        size = path.stat().st_size
-    except OSError:
-        return None
-    if size > _MAX_EMBED_BYTES:
-        return None
-    mime, _ = mimetypes.guess_type(path.name)
-    if not mime or not mime.startswith("image/"):
-        mime = "image/jpeg"
-    try:
-        payload = base64.standard_b64encode(path.read_bytes()).decode("ascii")
-    except OSError:
-        return None
-    return f"data:{mime};base64,{payload}"
+        width = int(msg.get("width") or 0)
+        height = int(msg.get("height") or 0)
+    except (TypeError, ValueError):
+        width = height = 0
+    if width > 0 and height > 0:
+        if width >= height:
+            show_w = min(width, max_px)
+            show_h = max(1, round(height * show_w / width))
+            return f"width: {show_w}px; height: {show_h}px"
+        show_h = min(height, max_px)
+        show_w = max(1, round(width * show_h / height))
+        return f"width: {show_w}px; height: {show_h}px"
+    return f"width: {max_px}px; height: auto"
 
 
 def _text_is_redundant_media_path(msg: dict[str, Any]) -> bool:
@@ -457,76 +450,85 @@ def _render_media_blocks(
     mid = int(msg.get("id") or 0)
     blocks: list[str] = []
     rendered_photos: set[str] = set()
+    rendered_stickers: set[str] = set()
+    style = _media_style(msg)
+
     for kind, rel in extract_media_refs(msg):
         if kind == "thumbnail":
             continue
+        rel_esc = html.escape(rel, quote=True)
+
         if kind == "photo":
             if rel in rendered_photos:
                 continue
             rendered_photos.add(rel)
             thumb_rel = photo_thumb_relative(rel)
-            display_rel = thumb_rel
-            display_path = _bundle_file(bundle_dir, thumb_rel, media_map, mid)
-            full_path = _bundle_file(bundle_dir, rel, media_map, mid)
-            if display_path is None:
-                display_rel = rel
-                display_path = full_path
-            if display_path is None:
+            src_rel = thumb_rel if _bundle_has_file(bundle_dir, thumb_rel, media_map, mid) else rel
+            if not _bundle_has_file(bundle_dir, rel, media_map, mid) and not _bundle_has_file(
+                bundle_dir, src_rel, media_map, mid
+            ):
                 continue
-            href_path = full_path or display_path
-            href_esc = html.escape(href_path.as_uri(), quote=True)
-            src_esc = _image_src_attr(display_path)
+            src_esc = html.escape(src_rel, quote=True)
             blocks.extend(
                 [
                     "       <div class=\"media_wrap clearfix\">\n",
-                    f"        <a class=\"photo_wrap clearfix pull_left\" href=\"{href_esc}\">\n",
-                    f"         <img class=\"photo\" src=\"{src_esc}\" "
-                    "style=\"width: 260px; height: auto\"/>\n",
+                    f"        <a class=\"photo_wrap clearfix pull_left\" href=\"{rel_esc}\">\n",
+                    f"         <img class=\"photo\" src=\"{src_esc}\" style=\"{style}\"/>\n",
                     "        </a>\n",
                     "       </div>\n",
                 ]
             )
             continue
-        file_path = _bundle_file(bundle_dir, rel, media_map, mid)
-        if file_path is None:
-            continue
-        rel_esc = html.escape(rel)
+
         if kind == "sticker" and is_raster_image_path(rel):
-            src_esc = _image_src_attr(file_path)
+            if rel in rendered_stickers:
+                continue
+            rendered_stickers.add(rel)
+            thumb_rel = sticker_thumb_relative(rel)
+            src_rel = thumb_rel if _bundle_has_file(bundle_dir, thumb_rel, media_map, mid) else rel
+            if not _bundle_has_file(bundle_dir, rel, media_map, mid) and not _bundle_has_file(
+                bundle_dir, src_rel, media_map, mid
+            ):
+                continue
+            src_esc = html.escape(src_rel, quote=True)
             blocks.extend(
                 [
                     "       <div class=\"media_wrap clearfix\">\n",
-                    f"        <img class=\"sticker\" src=\"{src_esc}\" "
-                    "style=\"max-width: 260px; height: auto\"/>\n",
+                    f"        <a class=\"sticker_wrap clearfix pull_left\" href=\"{rel_esc}\">\n",
+                    f"         <img class=\"sticker\" src=\"{src_esc}\" style=\"{style}\"/>\n",
+                    "        </a>\n",
                     "       </div>\n",
                 ]
             )
-        elif kind in ("video", "animation", "video_note"):
-            src_esc = html.escape(file_path.as_uri(), quote=True)
+            continue
+
+        if not _bundle_has_file(bundle_dir, rel, media_map, mid):
+            continue
+
+        if kind in ("video", "animation", "video_note", "video_file"):
             blocks.extend(
                 [
                     "       <div class=\"media_wrap clearfix\">\n",
                     f"        <video class=\"video_file\" controls preload=\"metadata\" "
-                    f"src=\"{src_esc}\"></video>\n",
+                    f"src=\"{rel_esc}\"></video>\n",
                     "       </div>\n",
                 ]
             )
-        elif kind in ("voice_message", "audio", "music"):
-            src_esc = html.escape(file_path.as_uri(), quote=True)
+        elif kind in ("voice_message", "audio", "music", "audio_file"):
             blocks.extend(
                 [
                     "       <div class=\"media_wrap clearfix\">\n",
-                    f"        <audio controls src=\"{src_esc}\"></audio>\n",
+                    f"        <audio controls src=\"{rel_esc}\"></audio>\n",
                     "       </div>\n",
                 ]
             )
         elif is_raster_image_path(rel):
-            src_esc = _image_src_attr(file_path)
             blocks.extend(
                 [
                     "       <div class=\"media_wrap clearfix\">\n",
-                    f"        <img class=\"photo\" src=\"{src_esc}\" "
-                    "style=\"max-width: 260px; height: auto\"/>\n",
+                    f"        <a class=\"photo_wrap clearfix pull_left\" href=\"{rel_esc}\">\n",
+                    f"         <img class=\"photo\" src=\"{rel_esc}\" style=\"{style}\"/>\n",
+                    "        </a>\n",
                     "       </div>\n",
                 ]
             )

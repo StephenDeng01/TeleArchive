@@ -52,15 +52,26 @@ def extract_media_refs(msg: dict[str, Any]) -> list[tuple[str, str]]:
     add("media", msg.get("media"))
 
     file_path = msg.get("file")
+    media_type = str(msg.get("media_type") or "")
     if isinstance(file_path, str) and file_path.strip():
-        kind = msg.get("media_type")
-        add(str(kind) if kind else "file", file_path.strip())
+        rel = file_path.strip()
+        if media_type == "sticker" or rel.startswith("stickers/"):
+            add("sticker", rel)
+            add("thumbnail", sticker_thumb_relative(rel))
+        else:
+            add(str(media_type) if media_type else "file", rel)
 
     return refs
 
 
 def photo_thumb_relative(photo_rel: str) -> str:
     path = Path(photo_rel)
+    return str(path.with_name(f"{path.stem}_thumb{path.suffix}"))
+
+
+def sticker_thumb_relative(sticker_rel: str) -> str:
+    """Telegram HTML export: ``stickers/foo.webp`` -> ``stickers/foo_thumb.webp``."""
+    path = Path(sticker_rel)
     return str(path.with_name(f"{path.stem}_thumb{path.suffix}"))
 
 

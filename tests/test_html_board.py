@@ -36,7 +36,7 @@ def test_render_native_html_inlines_css(tmp_path: Path) -> None:
     assert BOARD_RENDER_VERSION.startswith("r")
 
 
-def test_render_photo_embeds_data_uri(tmp_path: Path) -> None:
+def test_render_photo_uses_relative_paths(tmp_path: Path) -> None:
     photos = tmp_path / "photos"
     photos.mkdir()
     img = photos / "pic.jpg"
@@ -50,8 +50,35 @@ def test_render_photo_embeds_data_uri(tmp_path: Path) -> None:
         "from": "A",
         "from_id": "u1",
         "photo": "photos/pic.jpg",
+        "width": 1280,
+        "height": 720,
     }
     media_map = {(1, "photos/pic.jpg"): str(img)}
     out = _render_native_html("Test", [msg], media_map, tmp_path)
     assert 'class="photo"' in out
-    assert "data:image/jpeg;base64," in out
+    assert 'src="photos/pic.jpg"' in out
+    assert "data:image" not in out
+
+
+def test_render_sticker_native_markup(tmp_path: Path) -> None:
+    stickers = tmp_path / "stickers"
+    stickers.mkdir()
+    img = stickers / "sticker.webp"
+    img.write_bytes(b"RIFF")
+    (tmp_path / "css").mkdir()
+    (tmp_path / "css" / "style.css").write_text("", encoding="utf-8")
+    msg = {
+        "id": 2,
+        "type": "message",
+        "date_unixtime": "1716199200",
+        "from": "B",
+        "from_id": "u2",
+        "file": "stickers/sticker.webp",
+        "media_type": "sticker",
+        "width": 512,
+        "height": 512,
+    }
+    media_map = {(2, "stickers/sticker.webp"): str(img)}
+    out = _render_native_html("Test", [msg], media_map, tmp_path)
+    assert "sticker_wrap" in out
+    assert 'href="stickers/sticker.webp"' in out
