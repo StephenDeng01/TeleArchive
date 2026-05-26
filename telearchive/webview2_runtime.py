@@ -10,10 +10,12 @@ from collections.abc import Callable
 from pathlib import Path
 from urllib.request import urlretrieve
 
-# Pinned Fixed Version (x64) from NuGet; update when rebuilding releases.
-FIXED_RUNTIME_VERSION = "131.0.2903.86"
-NUGET_PACKAGE = f"Microsoft.WebView2.FixedVersionRuntime.{FIXED_RUNTIME_VERSION}"
-NUGET_URL = f"https://www.nuget.org/api/v2/package/{NUGET_PACKAGE}/"
+# Pinned Fixed Version (x64) via community NuGet mirror of Microsoft's runtime.
+FIXED_RUNTIME_VERSION = "148.0.3967.83"
+NUGET_URL = (
+    "https://api.nuget.org/v3-flatcontainer/webview2.runtime.x64/"
+    f"{FIXED_RUNTIME_VERSION}/webview2.runtime.x64.{FIXED_RUNTIME_VERSION}.nupkg"
+)
 
 
 def app_install_dir() -> Path:
@@ -104,13 +106,20 @@ def bootstrap_portable_runtime(
     with zipfile.ZipFile(zip_path) as archive:
         archive.extractall(extract_root)
 
-    native = extract_root / "runtimes" / "win-x64" / "native"
-    if not (native / "msedgewebview2.exe").is_file():
-        raise RuntimeError(f"NuGet 包结构异常，未找到 msedgewebview2.exe: {native}")
+    runtime_exe: Path | None = None
+    for candidate in extract_root.rglob("msedgewebview2.exe"):
+        runtime_exe = candidate
+        break
+    if runtime_exe is None:
+        raise RuntimeError("NuGet 包中未找到 msedgewebview2.exe")
 
+    native = runtime_exe.parent
     if target.exists():
         shutil.rmtree(target, ignore_errors=True)
     shutil.copytree(native, target)
+    (target / "telearchive-webview2-version.txt").write_text(
+        FIXED_RUNTIME_VERSION, encoding="ascii"
+    )
 
     shutil.rmtree(staging, ignore_errors=True)
     configure_portable_webview2()
