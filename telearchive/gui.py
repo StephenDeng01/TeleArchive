@@ -21,9 +21,10 @@ from telearchive.updater import (
     check_for_update,
     should_notify_update,
 )
+from telearchive.paths import default_db_path
 
 
-DEFAULT_DB = Path("data/telearchive.db")
+DEFAULT_DB = default_db_path()
 
 
 def launch_gui() -> None:

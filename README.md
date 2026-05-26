@@ -129,7 +129,7 @@ telearchive status
 telearchive gaps --min-gap 10
 ```
 
-默认数据库路径：`data/telearchive.db`
+默认数据库路径：`E:/tg_chat_history/telearchive.db`（Windows；不可用则回退 `data/telearchive.db`）
 
 ```bash
 telearchive ingest --db /path/to/archive.db ./exports/batch1
@@ -191,7 +191,7 @@ SELECT preferred_absolute_path FROM message_media WHERE ...;
 | `telearchive check-update` | 🔔 检查是否有新版本（仅提醒） |
 | `telearchive export <目录>` | 📤 按时间范围导出为 Telegram JSON 目录 |
 
-全局选项：`--db <路径>` 指定数据库文件（默认 `data/telearchive.db`）。
+全局选项：`--db <路径>` 指定数据库文件（默认自动选择：`E:/tg_chat_history/telearchive.db` 或 `data/telearchive.db`）。
 
 ### 📤 按时间导出
 
@@ -240,7 +240,7 @@ telearchive check-update --dismiss 0.3.0   # 不再提示指定版本
 数据库为标准 SQLite，可使用任意客户端或脚本访问。
 
 ```bash
-sqlite3 data/telearchive.db
+sqlite3 E:/tg_chat_history/telearchive.db
 ```
 
 ```sql
@@ -282,7 +282,7 @@ Python 示例：
 import sqlite3
 import pandas as pd
 
-conn = sqlite3.connect("data/telearchive.db")
+conn = sqlite3.connect("E:/tg_chat_history/telearchive.db")
 df = pd.read_sql("SELECT * FROM messages WHERE chat_id = ?", conn, params=(chat_id,))
 ```
 
@@ -315,7 +315,7 @@ df = pd.read_sql("SELECT * FROM messages WHERE chat_id = ?", conn, params=(chat_
 5. **检查更新** — 查看是否有新版本（可选提醒，不强制更新）
 6. **按时间导出** — 导出为原生 Telegram JSON 目录，便于二次分析或分享
 
-数据库路径可在界面顶部修改（默认 `data\telearchive.db`）。
+数据库路径可在界面顶部修改（默认 `E:\tg_chat_history\telearchive.db`，不可用则回退本地 `data/telearchive.db`）。
 
 ### ⌨️ 命令行（高级）
 

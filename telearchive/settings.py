@@ -6,7 +6,9 @@ import json
 from pathlib import Path
 from typing import Any
 
-DEFAULT_SETTINGS_PATH = Path("data/settings.json")
+from telearchive.paths import default_settings_path
+
+DEFAULT_SETTINGS_PATH = default_settings_path()
 
 
 def settings_path(path: Path | None = None) -> Path:

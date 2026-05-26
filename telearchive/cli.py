@@ -16,6 +16,7 @@ from telearchive.db import Database
 from telearchive.export_chat import export_chat_range
 from telearchive.merge import ingest_paths
 from telearchive.updater import check_for_update, dismiss_update_reminder
+from telearchive.paths import default_db_path
 
 app = typer.Typer(
     name="telearchive",
@@ -24,7 +25,7 @@ app = typer.Typer(
 )
 console = Console()
 
-DEFAULT_DB = Path("data/telearchive.db")
+DEFAULT_DB = default_db_path()
 
 
 def _resolve_db(db: Optional[Path]) -> Path:
