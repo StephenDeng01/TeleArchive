@@ -1,0 +1,255 @@
+"""Command-line interface for TeleArchive."""
+
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Optional
+
+import typer
+from rich.console import Console
+from rich.table import Table
+
+from telearchive import __version__
+from telearchive.coverage import export_coverage, find_id_gaps
+from telearchive.db import Database
+from telearchive.merge import ingest_paths
+
+app = typer.Typer(
+    name="telearchive",
+    help="合并 Telegram Desktop 导出的 JSON 聊天记录并写入 SQLite。",
+    no_args_is_help=True,
+)
+console = Console()
+
+DEFAULT_DB = Path("data/telearchive.db")
+
+
+def _resolve_db(db: Optional[Path]) -> Path:
+    return db or DEFAULT_DB
+
+
+@app.command()
+def version() -> None:
+    """显示版本号。"""
+    console.print(f"telearchive {__version__}")
+
+
+@app.command()
+def init(
+    db: Optional[Path] = typer.Option(
+        None, "--db", help="数据库路径，默认 data/telearchive.db"
+    ),
+) -> None:
+    """初始化数据库（创建表结构）。"""
+    path = _resolve_db(db)
+    with Database(path) as database:
+        database.init_schema()
+    console.print(f"[green]已初始化[/green] {path.resolve()}")
+
+
+@app.command()
+def ingest(
+    paths: list[Path] = typer.Argument(
+        ...,
+        help="导出目录、父文件夹或 result.json；父文件夹下多个 ChatExport_* 会自动全部导入",
+    ),
+    db: Optional[Path] = typer.Option(
+        None, "--db", help="数据库路径，默认 data/telearchive.db"
+    ),
+) -> None:
+    """导入并合并聊天记录（按 chat_id + message_id 去重，保留旧导出中已删消息）。"""
+    db_path = _resolve_db(db)
+    with Database(db_path) as database:
+        try:
+            results = ingest_paths(database, paths)
+        except FileNotFoundError as e:
+            console.print(f"[red]错误[/red]: {e}")
+            raise typer.Exit(1) from e
+        except ValueError as e:
+            console.print(f"[red]解析失败[/red]: {e}")
+            raise typer.Exit(1) from e
+
+        if not results:
+            console.print("[yellow]未找到任何 result.json[/yellow]")
+            raise typer.Exit(1)
+
+        chats = database.list_chat_stats()
+
+    table = Table(title="导入结果（按时间从旧到新合并）")
+    table.add_column("文件")
+    table.add_column("消息", justify="right")
+    table.add_column("新增", justify="right")
+    table.add_column("更新", justify="right")
+    table.add_column("媒体引用", justify="right")
+    table.add_column("媒体在盘", justify="right")
+    table.add_column("媒体缺失", justify="right")
+
+    total_seen = total_new = total_updated = 0
+    for source, stats in results:
+        total_seen += stats.messages_seen
+        total_new += stats.messages_new
+        total_updated += stats.messages_updated
+        table.add_row(
+            _export_label(source),
+            str(stats.messages_seen),
+            str(stats.messages_new),
+            str(stats.messages_updated),
+            str(stats.media_refs),
+            str(stats.media_found),
+            str(stats.media_missing),
+        )
+
+    console.print(table)
+    if chats:
+        console.print(
+            f"\n合并后共 [cyan]{chats[0].message_count}[/cyan] 条唯一消息 "
+            f"（本批处理 {total_seen}，新增 {total_new}，更新 {total_updated}）"
+        )
+        if len(results) > 1:
+            latest_seen = results[-1][1].messages_seen
+            preserved = max(chats[0].message_count - latest_seen, 0)
+            if preserved:
+                console.print(
+                    f"[dim]较新导出中已消失、仅由较早导出保留的消息约 "
+                    f"{preserved} 条（群自动删除导致）[/dim]"
+                )
+    console.print(f"数据库: [cyan]{db_path.resolve()}[/cyan]")
+
+
+@app.command("status")
+def status_cmd(
+    db: Optional[Path] = typer.Option(
+        None, "--db", help="数据库路径，默认 data/telearchive.db"
+    ),
+) -> None:
+    """查看各群聊消息统计与最近导入记录。"""
+    db_path = _resolve_db(db)
+    if not db_path.is_file():
+        console.print(f"[red]数据库不存在[/red]: {db_path}，请先运行 ingest")
+        raise typer.Exit(1)
+
+    with Database(db_path) as database:
+        chats = database.list_chat_stats()
+        imports = database.import_history()
+        logical, locations, media_found, media_missing = database.media_stats()
+
+    if chats:
+        table = Table(title="群聊概览")
+        table.add_column("ID", justify="right")
+        table.add_column("名称")
+        table.add_column("消息数", justify="right")
+        table.add_column("最早")
+        table.add_column("最晚")
+
+        for c in chats:
+            earliest = _fmt_ts(c.earliest)
+            latest = _fmt_ts(c.latest)
+            table.add_row(str(c.chat_id), c.name, str(c.message_count), earliest, latest)
+        console.print(table)
+    else:
+        console.print("[yellow]尚无聊天记录[/yellow]")
+
+    if logical:
+        console.print(
+            f"\n媒体：逻辑附件 [cyan]{logical}[/cyan]，"
+            f"路径记录 {locations}（含不同导出批次下的重复命名），"
+            f"磁盘存在 [green]{media_found}[/green]，缺失 [red]{media_missing}[/red]"
+        )
+        console.print(
+            "[dim]查询首选路径：message_media.preferred_absolute_path；"
+            "全部路径：media_locations 表。[/dim]"
+        )
+
+    if imports:
+        console.print()
+        hist = Table(title="最近导入")
+        hist.add_column("时间")
+        hist.add_column("来源")
+        hist.add_column("处理", justify="right")
+        hist.add_column("新增", justify="right")
+        hist.add_column("更新", justify="right")
+        for row in imports:
+            hist.add_row(
+                row["imported_at"],
+                _export_label(row["source_path"]),
+                str(row["messages_seen"]),
+                str(row["messages_new"]),
+                str(row["messages_updated"]),
+            )
+        console.print(hist)
+
+
+@app.command()
+def gaps(
+    chat_id: Optional[int] = typer.Option(
+        None, "--chat-id", help="群聊 ID；省略则使用库中第一个群"
+    ),
+    min_gap: int = typer.Option(
+        5, "--min-gap", help="仅显示连续缺失 message id 数 ≥ 此值的区段"
+    ),
+    db: Optional[Path] = typer.Option(
+        None, "--db", help="数据库路径，默认 data/telearchive.db"
+    ),
+) -> None:
+    """分析 message id 序列中的空洞（通常由群自动删消息导致）。"""
+    db_path = _resolve_db(db)
+    if not db_path.is_file():
+        console.print(f"[red]数据库不存在[/red]: {db_path}")
+        raise typer.Exit(1)
+
+    with Database(db_path) as database:
+        chats = database.list_chat_stats()
+        if not chats:
+            console.print("[yellow]尚无聊天记录[/yellow]")
+            raise typer.Exit(0)
+        target = chat_id if chat_id is not None else chats[0].chat_id
+        chat_name = next((c.name for c in chats if c.chat_id == target), str(target))
+        id_gaps = find_id_gaps(database._conn, target, min_gap=min_gap)
+        coverage = export_coverage(database._conn, target)
+
+    console.print(f"群聊：[cyan]{chat_name}[/cyan] (id={target})")
+
+    if coverage:
+        cov = Table(title="各导出批次贡献")
+        cov.add_column("导出")
+        cov.add_column("本批消息", justify="right")
+        cov.add_column("首次入库", justify="right")
+        for row in coverage:
+            cov.add_row(
+                _export_label(row.source_path),
+                str(row.messages_seen),
+                str(row.messages_new),
+            )
+        console.print(cov)
+
+    if not id_gaps:
+        console.print(f"\n未发现 ≥{min_gap} 的 message id 空洞。")
+        return
+
+    gap_table = Table(title=f"Message ID 空洞（≥{min_gap}）")
+    gap_table.add_column("前一条 id", justify="right")
+    gap_table.add_column("后一条 id", justify="right")
+    gap_table.add_column("缺失条数", justify="right")
+    for gap in id_gaps[:30]:
+        gap_table.add_row(str(gap.after_id), str(gap.before_id), str(gap.missing_count))
+    console.print(gap_table)
+    if len(id_gaps) > 30:
+        console.print(f"[dim]… 另有 {len(id_gaps) - 30} 段未显示[/dim]")
+
+
+def _fmt_ts(ts: int | None) -> str:
+    if ts is None or ts == 0:
+        return "-"
+    return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+
+def _export_label(source: str) -> str:
+    path = Path(source)
+    if path.name == "result.json" and path.parent.name:
+        return path.parent.name
+    return path.name
+
+
+if __name__ == "__main__":
+    app()

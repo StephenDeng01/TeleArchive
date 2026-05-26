@@ -1,0 +1,36 @@
+{
+  "name": "测试群",
+  "type": "private_supergroup",
+  "id": -1001234567890,
+  "messages": [
+    {
+      "id": 2,
+      "type": "message",
+      "date": "2026-05-20T10:01:00",
+      "date_unixtime": "1716199260",
+      "from": "Bob",
+      "from_id": "user222",
+      "text": "第二条"
+    },
+    {
+      "id": 3,
+      "type": "message",
+      "date": "2026-05-21T08:00:00",
+      "date_unixtime": "1716278400",
+      "from": "Alice",
+      "from_id": "user111",
+      "text": "第三条"
+    },
+    {
+      "id": 2,
+      "type": "message",
+      "date": "2026-05-20T10:05:00",
+      "date_unixtime": "1716199260",
+      "from": "Bob",
+      "from_id": "user222",
+      "text": "第二条（已编辑）",
+      "edited": "2026-05-21T09:00:00",
+      "edited_unixtime": "1716282000"
+    }
+  ]
+}

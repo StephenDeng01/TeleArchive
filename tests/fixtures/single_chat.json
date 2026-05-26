@@ -1,0 +1,25 @@
+{
+  "name": "测试群",
+  "type": "private_supergroup",
+  "id": -1001234567890,
+  "messages": [
+    {
+      "id": 1,
+      "type": "message",
+      "date": "2026-05-20T10:00:00",
+      "date_unixtime": "1716199200",
+      "from": "Alice",
+      "from_id": "user111",
+      "text": "第一条"
+    },
+    {
+      "id": 2,
+      "type": "message",
+      "date": "2026-05-20T10:01:00",
+      "date_unixtime": "1716199260",
+      "from": "Bob",
+      "from_id": "user222",
+      "text": "第二条"
+    }
+  ]
+}

@@ -1,0 +1,31 @@
+[project]
+name = "telearchive"
+version = "0.1.0"
+description = "合并 Telegram Desktop 手动导出的群聊记录，去重入库供分析"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "typer>=0.12.0",
+    "rich>=13.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+]
+build = [
+    "pyinstaller>=6.0.0",
+]
+
+[project.scripts]
+telearchive = "telearchive.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["telearchive"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
