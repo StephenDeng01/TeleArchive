@@ -384,11 +384,13 @@ def _build_windows_updater_script(*, current_exe: Path, new_exe: Path) -> str:
     exe = str(current_exe)
     bak = str(current_exe.with_suffix(current_exe.suffix + ".old"))
     newf = str(new_exe)
+    exedir = str(current_exe.parent)
     return f"""@echo off
 setlocal enabledelayedexpansion
 set "TARGET={exe}"
 set "BACKUP={bak}"
 set "NEWFILE={newf}"
+set "EXEDIR={exedir}"
 set /a ATTEMPT=0
 
 :wait_and_replace
@@ -404,7 +406,7 @@ if exist "%TARGET%" (
 
 move /Y "%NEWFILE%" "%TARGET%" >nul 2>nul
 if exist "%TARGET%" (
-  start "" "%TARGET%"
+  start "" /D "%EXEDIR%" "%TARGET%"
   if exist "%BACKUP%" del /f /q "%BACKUP%" >nul 2>nul
   del /f /q "%~f0" >nul 2>nul
   exit /b 0

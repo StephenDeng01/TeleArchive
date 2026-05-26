@@ -64,7 +64,9 @@ exe = EXE(
     strip=False,
     upx=True,
     upx_exclude=[],
-    runtime_tmpdir=None,
+    # Extract onefile runtime payload next to the exe, instead of system temp.
+    # This avoids "Failed to load Python DLL" on some Windows setups where TEMP is restricted.
+    runtime_tmpdir=".",
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
