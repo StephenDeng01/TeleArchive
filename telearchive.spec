@@ -22,6 +22,8 @@ hiddenimports = collect_submodules("rich") + collect_submodules("typer") + [
     "telearchive.updater",
     "telearchive.update_dialog",
     "telearchive.notify",
+    "telearchive.export_dates",
+    "telearchive.export_chat",
 ]
 
 a = Analysis(

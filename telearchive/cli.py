@@ -13,6 +13,7 @@ from rich.table import Table
 from telearchive import __version__
 from telearchive.coverage import export_coverage, find_id_gaps
 from telearchive.db import Database
+from telearchive.export_chat import export_chat_range
 from telearchive.merge import ingest_paths
 from telearchive.updater import check_for_update, dismiss_update_reminder
 
@@ -34,6 +35,79 @@ def _resolve_db(db: Optional[Path]) -> Path:
 def version() -> None:
     """显示版本号。"""
     console.print(f"telearchive {__version__}")
+
+
+@app.command()
+def export(
+    output_dir: Path = typer.Argument(
+        ...,
+        help="导出目录（将生成 result.json 及 photos/ 等媒体子目录）",
+    ),
+    from_date: str = typer.Option(
+        ...,
+        "--from",
+        "from_date",
+        help="开始时间（YYYY-MM-DD 或 YYYY-MM-DDTHH:MM:SS 或 Unix 时间戳）",
+    ),
+    to_date: str = typer.Option(
+        ...,
+        "--to",
+        "to_date",
+        help="结束时间（日期含当天全天）",
+    ),
+    chat_id: Optional[int] = typer.Option(
+        None, "--chat-id", help="群聊 ID；省略则使用库中唯一群聊"
+    ),
+    no_media: bool = typer.Option(
+        False, "--no-media", help="仅导出 JSON，不复制媒体文件"
+    ),
+    db: Optional[Path] = typer.Option(
+        None, "--db", help="数据库路径，默认 data/telearchive.db"
+    ),
+) -> None:
+    """按时间范围导出为 Telegram Desktop 兼容的 JSON 目录结构。"""
+    db_path = _resolve_db(db)
+    if not db_path.is_file():
+        console.print(f"[red]数据库不存在[/red]: {db_path}")
+        raise typer.Exit(1)
+
+    with Database(db_path) as database:
+        chats = database.list_chat_stats()
+        if not chats:
+            console.print("[yellow]尚无聊天记录[/yellow]")
+            raise typer.Exit(1)
+        target = chat_id
+        if target is None:
+            if len(chats) != 1:
+                console.print(
+                    "[red]数据库中有多个群聊，请使用 --chat-id 指定[/red]"
+                )
+                for c in chats:
+                    console.print(f"  {c.chat_id}: {c.name}")
+                raise typer.Exit(1)
+            target = chats[0].chat_id
+
+        try:
+            result = export_chat_range(
+                database,
+                output_dir,
+                target,
+                from_bound=from_date,
+                to_bound=to_date,
+                include_media=not no_media,
+            )
+        except ValueError as exc:
+            console.print(f"[red]导出失败[/red]: {exc}")
+            raise typer.Exit(1) from exc
+
+    console.print(f"[green]导出完成[/green] → {result.output_dir}")
+    console.print(f"群聊: {result.chat_name} (id={result.chat_id})")
+    console.print(f"消息: {result.message_count} 条")
+    if not no_media:
+        console.print(
+            f"媒体: 复制 {result.media_copied} 个，缺失 {result.media_missing} 个"
+        )
+    console.print(f"主文件: {result.output_dir / 'result.json'}")
 
 
 @app.command("check-update")

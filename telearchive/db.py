@@ -569,6 +569,57 @@ class Database:
             (limit,),
         ).fetchall()
 
+    def get_chat(self, chat_id: int) -> sqlite3.Row | None:
+        return self._conn.execute(
+            "SELECT chat_id, name, chat_type FROM chats WHERE chat_id = ?",
+            (chat_id,),
+        ).fetchone()
+
+    def fetch_messages_in_range(
+        self,
+        chat_id: int,
+        start_unix: int,
+        end_unix: int,
+    ) -> list[sqlite3.Row]:
+        return self._conn.execute(
+            """
+            SELECT message_id, raw_json, date_unixtime
+            FROM messages
+            WHERE chat_id = ?
+              AND date_unixtime >= ?
+              AND date_unixtime <= ?
+            ORDER BY date_unixtime, message_id
+            """,
+            (chat_id, start_unix, end_unix),
+        ).fetchall()
+
+    def fetch_media_sources(
+        self,
+        chat_id: int,
+        message_ids: list[int],
+    ) -> dict[tuple[int, str], str]:
+        """Map (message_id, relative_path) -> absolute_path on disk."""
+        if not message_ids:
+            return {}
+        placeholders = ",".join("?" * len(message_ids))
+        rows = self._conn.execute(
+            f"""
+            SELECT message_id, relative_path, absolute_path, file_exists
+            FROM media_locations
+            WHERE chat_id = ?
+              AND message_id IN ({placeholders})
+              AND file_exists = 1
+            ORDER BY last_seen_at DESC
+            """,
+            (chat_id, *message_ids),
+        ).fetchall()
+        result: dict[tuple[int, str], str] = {}
+        for row in rows:
+            key = (int(row["message_id"]), str(row["relative_path"]))
+            if key not in result:
+                result[key] = str(row["absolute_path"])
+        return result
+
 
 def _message_row(
     chat_id: int,

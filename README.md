@@ -189,8 +189,34 @@ SELECT preferred_absolute_path FROM message_media WHERE ...;
 | `telearchive gaps` | 🕳️ 分析 message ID 序列空洞与各批次覆盖情况 |
 | `telearchive version` | ℹ️ 显示当前版本 |
 | `telearchive check-update` | 🔔 检查是否有新版本（仅提醒） |
+| `telearchive export <目录>` | 📤 按时间范围导出为 Telegram JSON 目录 |
 
 全局选项：`--db <路径>` 指定数据库文件（默认 `data/telearchive.db`）。
+
+### 📤 按时间导出
+
+从已合并的数据库中，导出指定时间段内的聊天记录，目录结构与 **Telegram Desktop 原生导出** 一致：
+
+```
+export_slice/
+├── result.json
+├── photos/
+├── video_files/
+└── stickers/
+```
+
+```bash
+# 导出 2026 年 5 月的消息（含媒体文件）
+telearchive export ./export_slice --from 2026-05-01 --to 2026-05-31
+
+# 仅导出 JSON，不复制图片/视频
+telearchive export ./export_slice --from 2026-05-01 --to 2026-05-31 --no-media
+
+# 指定群聊（数据库中有多个群时必填）
+telearchive export ./export_slice --chat-id 2837935940 --from 2026-05-20 --to 2026-05-26
+```
+
+图形界面底部提供 **「按时间导出」** 区域，填写起止日期与输出目录即可。
 
 ### 🔔 更新提醒
 
@@ -287,6 +313,7 @@ df = pd.read_sql("SELECT * FROM messages WHERE chat_id = ?", conn, params=(chat_
 3. **查看状态** — 消息总数、媒体索引、导入历史
 4. **缺口分析** — 查看因自动删消息造成的 ID 空洞
 5. **检查更新** — 查看是否有新版本（可选提醒，不强制更新）
+6. **按时间导出** — 导出为原生 Telegram JSON 目录，便于二次分析或分享
 
 数据库路径可在界面顶部修改（默认 `data\telearchive.db`）。
 

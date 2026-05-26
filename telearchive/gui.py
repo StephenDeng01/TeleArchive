@@ -12,6 +12,7 @@ from tkinter import filedialog, messagebox, scrolledtext, ttk
 from telearchive import __version__
 from telearchive.coverage import export_coverage, find_id_gaps
 from telearchive.db import Database
+from telearchive.export_chat import export_chat_range
 from telearchive.merge import ingest_paths
 from telearchive.notify import notify_update_available
 from telearchive.update_dialog import UpdateDialog
@@ -115,6 +116,48 @@ class TeleArchiveApp(tk.Tk):
         self.btn_update = ttk.Button(action_row, text="检查更新", command=self._check_update_manual)
         self.btn_update.pack(side=tk.RIGHT)
 
+        export_frame = ttk.LabelFrame(root, text="按时间导出（Telegram JSON 格式）", padding=10)
+        export_frame.pack(fill=tk.X, **pad)
+
+        self.export_from = tk.StringVar(value="2026-05-01")
+        self.export_to = tk.StringVar(value="2026-05-31")
+        self.export_out = tk.StringVar(value=str(Path("exports/export_slice").resolve()))
+        self.export_chat_id = tk.StringVar(value="")
+        self.export_include_media = tk.BooleanVar(value=True)
+
+        row1 = ttk.Frame(export_frame)
+        row1.pack(fill=tk.X, pady=(0, 6))
+        ttk.Label(row1, text="从").pack(side=tk.LEFT)
+        ttk.Entry(row1, textvariable=self.export_from, width=14).pack(
+            side=tk.LEFT, padx=(4, 12)
+        )
+        ttk.Label(row1, text="到").pack(side=tk.LEFT)
+        ttk.Entry(row1, textvariable=self.export_to, width=14).pack(
+            side=tk.LEFT, padx=(4, 12)
+        )
+        ttk.Label(row1, text="群聊 ID（可空）").pack(side=tk.LEFT)
+        ttk.Entry(row1, textvariable=self.export_chat_id, width=16).pack(
+            side=tk.LEFT, padx=(4, 0)
+        )
+
+        row2 = ttk.Frame(export_frame)
+        row2.pack(fill=tk.X, pady=(0, 6))
+        ttk.Label(row2, text="输出目录").pack(side=tk.LEFT)
+        ttk.Entry(row2, textvariable=self.export_out).pack(
+            side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 8)
+        )
+        ttk.Button(row2, text="浏览…", command=self._browse_export_dir).pack(side=tk.RIGHT)
+
+        row3 = ttk.Frame(export_frame)
+        row3.pack(fill=tk.X)
+        ttk.Checkbutton(
+            row3,
+            text="包含媒体文件（photos/、video_files/ 等）",
+            variable=self.export_include_media,
+        ).pack(side=tk.LEFT)
+        self.btn_export = ttk.Button(row3, text="导出", command=self._run_export)
+        self.btn_export.pack(side=tk.RIGHT)
+
         try:
             style = ttk.Style()
             style.configure("Accent.TButton", font=("Segoe UI", 10, "bold"))
@@ -151,10 +194,16 @@ class TeleArchiveApp(tk.Tk):
             self.btn_status,
             self.btn_gaps,
             self.btn_update,
+            self.btn_export,
         ):
             widget.configure(state=state)
         self.status.configure(text=text)
         self.configure(cursor="watch" if busy else "")
+
+    def _browse_export_dir(self) -> None:
+        path = filedialog.askdirectory(title="选择导出目录")
+        if path:
+            self.export_out.set(path)
 
     def _browse_db(self) -> None:
         path = filedialog.asksaveasfilename(
@@ -346,6 +395,68 @@ class TeleArchiveApp(tk.Tk):
             self.after(0, lambda: self._log("\n".join(lines)))
 
         self._run_async("正在分析…", worker)
+
+    def _run_export(self) -> None:
+        def worker() -> None:
+            db_path = Path(self.db_path.get())
+            if not db_path.is_file():
+                self.after(
+                    0,
+                    lambda: messagebox.showwarning("提示", "数据库不存在，请先导入聊天记录。"),
+                )
+                return
+
+            chat_id_text = self.export_chat_id.get().strip()
+            with Database(db_path) as db:
+                chats = db.list_chat_stats()
+                if not chats:
+                    self.after(0, lambda: messagebox.showwarning("提示", "尚无聊天记录。"))
+                    return
+                if chat_id_text:
+                    chat_id = int(chat_id_text)
+                elif len(chats) == 1:
+                    chat_id = chats[0].chat_id
+                else:
+                    self.after(
+                        0,
+                        lambda: messagebox.showwarning(
+                            "提示",
+                            "数据库中有多个群聊，请填写群聊 ID。",
+                        ),
+                    )
+                    return
+
+                try:
+                    result = export_chat_range(
+                        db,
+                        Path(self.export_out.get()),
+                        chat_id,
+                        from_bound=self.export_from.get().strip(),
+                        to_bound=self.export_to.get().strip(),
+                        include_media=self.export_include_media.get(),
+                    )
+                except (ValueError, OSError) as exc:
+                    self.after(0, lambda: messagebox.showerror("导出失败", str(exc)))
+                    return
+
+            lines = [
+                "",
+                "=== 导出完成 ===",
+                f"目录: {result.output_dir}",
+                f"群聊: {result.chat_name}",
+                f"消息: {result.message_count} 条",
+                f"媒体: 复制 {result.media_copied}，缺失 {result.media_missing}",
+            ]
+            self.after(0, lambda: self._log("\n".join(lines)))
+            self.after(
+                0,
+                lambda: messagebox.showinfo(
+                    "导出完成",
+                    f"已写入 {result.message_count} 条消息\n{result.output_dir}",
+                ),
+            )
+
+        self._run_async("正在导出…", worker)
 
     def _check_update_on_startup(self) -> None:
         def worker() -> None:
