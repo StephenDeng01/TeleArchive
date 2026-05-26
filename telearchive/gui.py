@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 import threading
 import tkinter as tk
+from datetime import datetime
 from pathlib import Path
 from typing import Callable
 from tkinter import filedialog, messagebox, scrolledtext, ttk
@@ -13,6 +14,12 @@ from telearchive import __version__
 from telearchive.coverage import export_coverage, find_id_gaps
 from telearchive.db import Database
 from telearchive.export_chat import export_chat_range
+from telearchive.html_board import (
+    BoardRenderResult,
+    render_range_to_cache,
+    set_shortcut_range,
+    warmup_all_messages_cache,
+)
 from telearchive.merge import ingest_paths
 from telearchive.notify import notify_update_available
 from telearchive.update_dialog import UpdateDialog
@@ -25,6 +32,12 @@ from telearchive.updater import (
 )
 from telearchive.paths import default_export_slice_dir
 from telearchive.paths import default_db_path
+from telearchive.paths import default_html_cache_dir
+
+try:
+    from tkinterweb import HtmlFrame
+except Exception:  # noqa: BLE001 - optional at runtime
+    HtmlFrame = None
 
 
 DEFAULT_DB = default_db_path()
@@ -46,6 +59,9 @@ class TeleArchiveApp(tk.Tk):
         self.db_path = tk.StringVar(value=str(DEFAULT_DB.resolve()))
         self.export_paths: list[Path] = []
         self._busy = False
+        self._board_html: HtmlFrame | None = None
+        self._board_loaded_file: Path | None = None
+        self._board_cache_dir = default_html_cache_dir().resolve()
 
         self._build_ui()
         self._log("欢迎使用 TeleArchive。请选择 Telegram 导出文件夹，然后点击「导入合并」。")
@@ -54,11 +70,18 @@ class TeleArchiveApp(tk.Tk):
 
     def _build_ui(self) -> None:
         pad = {"padx": 10, "pady": 6}
-        root = ttk.Frame(self, padding=12)
+        root = ttk.Frame(self, padding=8)
         root.pack(fill=tk.BOTH, expand=True)
 
-        # Header
-        header = ttk.Frame(root)
+        paned = ttk.PanedWindow(root, orient=tk.HORIZONTAL)
+        paned.pack(fill=tk.BOTH, expand=True)
+        left = ttk.Frame(paned, padding=12)
+        right = ttk.Frame(paned, padding=10)
+        paned.add(left, weight=3)
+        paned.add(right, weight=2)
+
+        # Left: existing tools
+        header = ttk.Frame(left)
         header.pack(fill=tk.X, **pad)
         ttk.Label(
             header,
@@ -72,7 +95,7 @@ class TeleArchiveApp(tk.Tk):
         ).pack(side=tk.LEFT, padx=(12, 0))
 
         # Database
-        db_frame = ttk.LabelFrame(root, text="数据库文件", padding=10)
+        db_frame = ttk.LabelFrame(left, text="数据库文件", padding=10)
         db_frame.pack(fill=tk.X, **pad)
         ttk.Entry(db_frame, textvariable=self.db_path).pack(
             side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 8)
@@ -80,7 +103,7 @@ class TeleArchiveApp(tk.Tk):
         ttk.Button(db_frame, text="浏览…", command=self._browse_db).pack(side=tk.RIGHT)
 
         # Export folders
-        export_frame = ttk.LabelFrame(root, text="Telegram 导出文件夹", padding=10)
+        export_frame = ttk.LabelFrame(left, text="Telegram 导出文件夹", padding=10)
         export_frame.pack(fill=tk.BOTH, expand=False, **pad)
 
         list_wrap = ttk.Frame(export_frame)
@@ -105,7 +128,7 @@ class TeleArchiveApp(tk.Tk):
         )
 
         # Actions
-        action_row = ttk.Frame(root)
+        action_row = ttk.Frame(left)
         action_row.pack(fill=tk.X, **pad)
         self.btn_init = ttk.Button(action_row, text="初始化数据库", command=self._init_db)
         self.btn_init.pack(side=tk.LEFT)
@@ -120,7 +143,7 @@ class TeleArchiveApp(tk.Tk):
         self.btn_update = ttk.Button(action_row, text="检查更新", command=self._check_update_manual)
         self.btn_update.pack(side=tk.RIGHT)
 
-        export_frame = ttk.LabelFrame(root, text="按时间导出（Telegram JSON 格式）", padding=10)
+        export_frame = ttk.LabelFrame(left, text="按时间导出（Telegram JSON 格式）", padding=10)
         export_frame.pack(fill=tk.X, **pad)
 
         self.export_from = tk.StringVar(value="2026-05-01")
@@ -169,7 +192,7 @@ class TeleArchiveApp(tk.Tk):
             pass
 
         # Log
-        log_frame = ttk.LabelFrame(root, text="运行日志", padding=10)
+        log_frame = ttk.LabelFrame(left, text="运行日志", padding=10)
         log_frame.pack(fill=tk.BOTH, expand=True, **pad)
         self.log = scrolledtext.ScrolledText(
             log_frame,
@@ -180,8 +203,73 @@ class TeleArchiveApp(tk.Tk):
         )
         self.log.pack(fill=tk.BOTH, expand=True)
 
+        # Right: HTML board
+        board_frame = ttk.LabelFrame(right, text="聊天看板（HTML 渲染）", padding=10)
+        board_frame.pack(fill=tk.BOTH, expand=True)
+        self.board_from = tk.StringVar(value=datetime.now().strftime("%Y-%m-%d"))
+        self.board_to = tk.StringVar(value=datetime.now().strftime("%Y-%m-%d"))
+
+        top_row = ttk.Frame(board_frame)
+        top_row.pack(fill=tk.X, pady=(0, 6))
+        ttk.Label(top_row, text="从").pack(side=tk.LEFT)
+        ttk.Entry(top_row, textvariable=self.board_from, width=12).pack(side=tk.LEFT, padx=(4, 8))
+        ttk.Label(top_row, text="到").pack(side=tk.LEFT)
+        ttk.Entry(top_row, textvariable=self.board_to, width=12).pack(side=tk.LEFT, padx=(4, 8))
+        ttk.Label(top_row, text="群聊ID").pack(side=tk.LEFT)
+        ttk.Entry(top_row, textvariable=self.export_chat_id, width=14).pack(side=tk.LEFT, padx=(4, 8))
+        self.btn_board_refresh = ttk.Button(top_row, text="刷新预览", command=self._render_board)
+        self.btn_board_refresh.pack(side=tk.RIGHT)
+
+        preset_row = ttk.Frame(board_frame)
+        preset_row.pack(fill=tk.X, pady=(0, 6))
+        self.btn_today = ttk.Button(
+            preset_row, text="今天", command=lambda: self._set_board_shortcut("today")
+        )
+        self.btn_3d = ttk.Button(
+            preset_row, text="近三天", command=lambda: self._set_board_shortcut("3d")
+        )
+        self.btn_7d = ttk.Button(
+            preset_row, text="近一周", command=lambda: self._set_board_shortcut("7d")
+        )
+        self.btn_30d = ttk.Button(
+            preset_row, text="近一月", command=lambda: self._set_board_shortcut("30d")
+        )
+        self.btn_all = ttk.Button(
+            preset_row, text="全部消息", command=lambda: self._set_board_shortcut("all")
+        )
+        self.btn_board_close = ttk.Button(
+            preset_row, text="关闭", command=self._close_board, style="Accent.TButton"
+        )
+        for btn in (self.btn_today, self.btn_3d, self.btn_7d, self.btn_30d, self.btn_all):
+            btn.pack(side=tk.LEFT, padx=(0, 6))
+        self.btn_board_close.pack(side=tk.RIGHT)
+
+        board_status_row = ttk.Frame(board_frame)
+        board_status_row.pack(fill=tk.X, pady=(0, 6))
+        self.board_status = ttk.Label(board_status_row, text="未加载", anchor=tk.W)
+        self.board_status.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        if HtmlFrame is not None:
+            self._board_html = HtmlFrame(board_frame, messages_enabled=False)
+            self._board_html.pack(fill=tk.BOTH, expand=True)
+        else:
+            self._board_html = None
+            placeholder = scrolledtext.ScrolledText(
+                board_frame,
+                height=20,
+                state=tk.NORMAL,
+                wrap=tk.WORD,
+            )
+            placeholder.insert(
+                tk.END,
+                "当前环境未安装 tkinterweb，无法在右侧渲染 HTML。\n"
+                "请安装依赖后重启：pip install tkinterweb\n",
+            )
+            placeholder.configure(state=tk.DISABLED)
+            placeholder.pack(fill=tk.BOTH, expand=True)
+
         self.status = ttk.Label(root, text="就绪", anchor=tk.W)
-        self.status.pack(fill=tk.X, padx=10, pady=(0, 8))
+        self.status.pack(fill=tk.X, padx=10, pady=(4, 8))
 
     def _log(self, message: str) -> None:
         self.log.configure(state=tk.NORMAL)
@@ -199,6 +287,13 @@ class TeleArchiveApp(tk.Tk):
             self.btn_gaps,
             self.btn_update,
             self.btn_export,
+            self.btn_board_refresh,
+            self.btn_board_close,
+            self.btn_today,
+            self.btn_3d,
+            self.btn_7d,
+            self.btn_30d,
+            self.btn_all,
         ):
             widget.configure(state=state)
         self.status.configure(text=text)
@@ -331,6 +426,8 @@ class TeleArchiveApp(tk.Tk):
                     chats[0].message_count if chats else "已完成",
                 ),
             )
+            if chats:
+                self.after(0, lambda: self._warmup_html_cache_async(chats[0].chat_id))
 
         self._run_async("正在导入合并…", worker)
 
@@ -462,6 +559,86 @@ class TeleArchiveApp(tk.Tk):
             )
 
         self._run_async("正在导出…", worker)
+
+    def _set_board_shortcut(self, name: str) -> None:
+        from_text, to_text = set_shortcut_range(name)
+        self.board_from.set(from_text)
+        self.board_to.set(to_text)
+        self._render_board()
+
+    def _resolve_board_chat_id(self, db: Database) -> int:
+        text = self.export_chat_id.get().strip()
+        if text:
+            return int(text)
+        chats = db.list_chat_stats()
+        if not chats:
+            raise ValueError("数据库中没有聊天记录，请先导入。")
+        if len(chats) > 1:
+            raise ValueError("数据库中有多个群聊，请填写群聊ID。")
+        return chats[0].chat_id
+
+    def _render_board(self) -> None:
+        if HtmlFrame is None:
+            messagebox.showwarning("预览不可用", "未安装 tkinterweb，无法渲染 HTML。")
+            return
+
+        def worker() -> None:
+            db_path = Path(self.db_path.get())
+            if not db_path.is_file():
+                raise ValueError("数据库不存在，请先初始化或导入。")
+            with Database(db_path) as db:
+                chat_id = self._resolve_board_chat_id(db)
+                result = render_range_to_cache(
+                    db,
+                    self._board_cache_dir,
+                    chat_id,
+                    self.board_from.get().strip(),
+                    self.board_to.get().strip(),
+                )
+            self.after(0, lambda: self._load_board_html(result))
+
+        self._run_async("正在编译看板…", worker)
+
+    def _load_board_html(self, result: BoardRenderResult) -> None:
+        if self._board_html is None:
+            return
+        self._board_html.load_file(str(result.html_path))
+        self._board_loaded_file = result.html_path
+        source = "缓存命中" if result.cached else "新编译"
+        self.board_status.configure(
+            text=(
+                f"{result.chat_name} | {result.message_count} 条 | "
+                f"{self.board_from.get()} ~ {self.board_to.get()} | {source}"
+            )
+        )
+        self._log(f"看板已加载: {result.html_path}")
+
+    def _close_board(self) -> None:
+        if self._board_html is not None:
+            self._board_html.load_html("<html><body></body></html>")
+        if self._board_loaded_file and self._board_loaded_file.is_file():
+            try:
+                self._board_loaded_file.unlink()
+                json_path = self._board_loaded_file.with_suffix(".json")
+                if json_path.is_file():
+                    json_path.unlink()
+            except OSError:
+                pass
+        self._board_loaded_file = None
+        self.board_status.configure(text="未加载")
+
+    def _warmup_html_cache_async(self, chat_id: int) -> None:
+        db_path = Path(self.db_path.get())
+        cache_dir = self._board_cache_dir
+
+        def worker() -> None:
+            try:
+                warmup_all_messages_cache(db_path, cache_dir, chat_id)
+                self.after(0, lambda: self._log("后台缓存：已完成全量 HTML 编译。"))
+            except Exception as exc:  # noqa: BLE001
+                self.after(0, lambda: self._log(f"后台缓存：编译失败（可忽略）: {exc}"))
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def _check_update_on_startup(self) -> None:
         def worker() -> None:

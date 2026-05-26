@@ -60,3 +60,8 @@ def default_export_slice_dir() -> Path:
     """Default directory for time-range export output."""
     return default_export_base_dir() / "export_slice"
 
+
+def default_html_cache_dir() -> Path:
+    """Default directory for rendered HTML board cache."""
+    return default_export_base_dir() / "html_cache"
+

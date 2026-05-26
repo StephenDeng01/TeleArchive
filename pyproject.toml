@@ -1,10 +1,12 @@
 [project]
 name = "telearchive"
-version = "0.5.3"
+version = "0.6.0"
 description = "合并 Telegram Desktop 手动导出的群聊记录，去重入库供分析"
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
+    "click>=8.1.0",
+    "tkinterweb>=3.25.12",
     "typer>=0.12.0",
     "rich>=13.0.0",
 ]

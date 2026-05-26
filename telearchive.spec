@@ -5,7 +5,11 @@ from PyInstaller.utils.hooks import collect_submodules
 
 block_cipher = None
 
-hiddenimports = collect_submodules("rich") + collect_submodules("typer") + [
+hiddenimports = (
+    collect_submodules("rich")
+    + collect_submodules("typer")
+    + collect_submodules("tkinterweb")
+    + [
     "click",
     "shellingham",
     "sqlite3",
@@ -25,7 +29,9 @@ hiddenimports = collect_submodules("rich") + collect_submodules("typer") + [
     "telearchive.notify",
     "telearchive.export_dates",
     "telearchive.export_chat",
+    "telearchive.html_board",
 ]
+)
 
 a = Analysis(
     ["telearchive/__main__.py"],
