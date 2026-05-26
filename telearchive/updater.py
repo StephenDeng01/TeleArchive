@@ -70,6 +70,20 @@ def normalize_version(tag: str) -> str:
     return match.group(1) if match else tag.lstrip("vV")
 
 
+def pick_newer_release(
+    left: ReleaseInfo | None,
+    right: ReleaseInfo | None,
+) -> ReleaseInfo | None:
+    """Return whichever release has the greater semantic version."""
+    if left is None:
+        return right
+    if right is None:
+        return left
+    if compare_versions(left.version, right.version) >= 0:
+        return left
+    return right
+
+
 def compare_versions(left: str, right: str) -> int:
     """Return 1 if left > right, -1 if left < right, 0 if equal."""
 
@@ -261,43 +275,69 @@ def fetch_latest_from_manifest(timeout: float = 8.0) -> ReleaseInfo:
 
 
 def fetch_latest_from_api(timeout: float = 8.0) -> ReleaseInfo:
+    candidates: list[ReleaseInfo] = []
     try:
         payload = _http_get_json(LATEST_RELEASE_API, timeout=timeout)
-        if isinstance(payload, dict):
-            return _release_from_payload(payload)
+        if isinstance(payload, dict) and not payload.get("draft"):
+            candidates.append(_release_from_payload(payload))
     except urllib.error.HTTPError as exc:
         if exc.code != 404:
             raise
+
     payload = _http_get_json(RELEASES_LIST_API, timeout=timeout)
     if not isinstance(payload, list):
         raise ValueError("Unexpected GitHub releases list")
+
+    latest: ReleaseInfo | None = None
     for item in payload:
         if not isinstance(item, dict):
             continue
         if item.get("draft"):
             continue
-        return _release_from_payload(item)
-    raise ValueError("GitHub 上尚无可用 Release")
+        try:
+            candidate = _release_from_payload(item)
+        except ValueError:
+            continue
+        latest = pick_newer_release(latest, candidate)
+
+    for candidate in candidates:
+        latest = pick_newer_release(latest, candidate)
+
+    if latest is None:
+        raise ValueError("GitHub 上尚无可用 Release")
+    return latest
 
 
 def fetch_latest_release(timeout: float = 8.0) -> ReleaseInfo:
-    """Try version.json first (CDN), then GitHub API."""
-    manifest_error: str | None = None
-    try:
-        return fetch_latest_from_manifest(timeout=timeout)
-    except urllib.error.HTTPError as exc:
-        manifest_error = _parse_github_http_error(exc)
-    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError) as exc:
-        manifest_error = str(exc)
+    """
+    Resolve the newest release from version.json and GitHub Releases API.
+
+    Either source can lag behind the other after CI pushes; always take the
+    higher semantic version so in-app checks stay correct.
+    """
+    errors: list[str] = []
+    manifest: ReleaseInfo | None = None
+    api: ReleaseInfo | None = None
 
     try:
-        return fetch_latest_from_api(timeout=timeout)
-    except urllib.error.HTTPError:
-        raise
+        manifest = fetch_latest_from_manifest(timeout=timeout)
+    except urllib.error.HTTPError as exc:
+        errors.append(_parse_github_http_error(exc))
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError) as exc:
-        if manifest_error:
-            raise ValueError(f"{manifest_error}; API: {exc}") from exc
-        raise
+        errors.append(f"manifest: {exc}")
+
+    try:
+        api = fetch_latest_from_api(timeout=timeout)
+    except urllib.error.HTTPError as exc:
+        errors.append(_parse_github_http_error(exc))
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError) as exc:
+        errors.append(f"api: {exc}")
+
+    latest = pick_newer_release(manifest, api)
+    if latest is None:
+        detail = "; ".join(errors) if errors else "未找到可用 Release"
+        raise ValueError(detail)
+    return latest
 
 
 def check_for_update(timeout: float = 8.0) -> UpdateCheckResult:

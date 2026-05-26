@@ -125,6 +125,15 @@ jobs:
           export VERSION="${GITHUB_REF_NAME#v}"
           export TAG="${GITHUB_REF_NAME}"
           export SHA
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git checkout main
+          git pull --ff-only origin main
+          # Write manifest on main after checkout so the commit is never lost.
+          export VERSION="${GITHUB_REF_NAME#v}"
+          export TAG="${GITHUB_REF_NAME}"
+          export SHA
           python - <<'PY'
           import json, os
           from pathlib import Path
@@ -151,11 +160,6 @@ jobs:
           }
           manifest.write_text(json.dumps(doc, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
           PY
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git fetch origin main
-          git checkout main
-          git pull origin main
           git add version.json
           git diff --staged --quiet && echo "version.json unchanged on main" && exit 0
           git commit -m "chore: update version.json for ${{ github.ref_name }}"

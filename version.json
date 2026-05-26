@@ -5,5 +5,5 @@
   "release_url": "https://github.com/StephenDeng01/TeleArchive/releases/tag/v0.6.8",
   "download_url": "https://github.com/StephenDeng01/TeleArchive/releases/download/v0.6.8/TeleArchive.exe",
   "sha256": "0427db8af82939dadb3bcdcc6db841154843d951a68969a58caae9b94da18a87",
-  "notes": "修复 Windows CI 推送 version.json 时使用 /tmp 导致失败的问题。"
+  "notes": "看板媒体预览、UTC+8 精确时间范围、导出快捷按钮。"
 }

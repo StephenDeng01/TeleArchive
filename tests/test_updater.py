@@ -5,10 +5,46 @@ from telearchive.settings import (
     set_dismissed_update_version,
 )
 from telearchive.updater import (
+    ReleaseInfo,
     UpdateCheckResult,
     compare_versions,
+    fetch_latest_release,
+    pick_newer_release,
     should_notify_update,
 )
+
+
+def test_pick_newer_release() -> None:
+    old = _fake_release("0.6.7")
+    new = _fake_release("0.6.8")
+    assert pick_newer_release(old, new) == new
+    assert pick_newer_release(new, old) == new
+    assert pick_newer_release(None, new) == new
+
+
+def test_fetch_latest_release_uses_newer_api(monkeypatch) -> None:
+    manifest = _fake_release("0.6.7")
+    api = _fake_release("0.6.8")
+    api = ReleaseInfo(
+        version=api.version,
+        tag=api.tag,
+        title=api.title,
+        url=api.url,
+        notes=api.notes,
+        download_url="https://example.com/TeleArchive.exe",
+        sha256=None,
+    )
+
+    monkeypatch.setattr(
+        "telearchive.updater.fetch_latest_from_manifest",
+        lambda **_: manifest,
+    )
+    monkeypatch.setattr(
+        "telearchive.updater.fetch_latest_from_api",
+        lambda **_: api,
+    )
+    latest = fetch_latest_release()
+    assert latest.version == "0.6.8"
 
 
 def test_compare_versions() -> None:
