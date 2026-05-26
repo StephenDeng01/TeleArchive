@@ -117,15 +117,45 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         shell: bash
         run: |
-          MANIFEST="${RUNNER_TEMP}/telearchive-version.json"
-          test -f "$MANIFEST" || (echo "missing manifest at $MANIFEST" && exit 1)
-          grep -E '"sha256": "[0-9a-f]{64}"' "$MANIFEST"
+          TAG="${GITHUB_REF_NAME}"
+          BASE="https://github.com/${{ github.repository }}/releases/download/${TAG}"
+          SHA=$(curl -fsSL "${BASE}/TeleArchive.exe.sha256" | tr -d '\r\n' | tr 'A-Z' 'a-z')
+          echo "sha256 from release CDN: ${SHA}"
+          echo "${SHA}" | grep -E '^[0-9a-f]{64}$'
+          export VERSION="${GITHUB_REF_NAME#v}"
+          export TAG="${GITHUB_REF_NAME}"
+          export SHA
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          owner, repo = "StephenDeng01", "TeleArchive"
+          version = os.environ["VERSION"].removeprefix("v")
+          tag = os.environ["TAG"]
+          sha = os.environ["SHA"].strip().lower()
+          notes = ""
+          manifest = Path("version.json")
+          if manifest.is_file():
+              try:
+                  old = json.loads(manifest.read_text(encoding="utf-8"))
+                  notes = str(old.get("notes") or "")
+              except json.JSONDecodeError:
+                  pass
+          doc = {
+              "version": version,
+              "tag": tag,
+              "title": f"TeleArchive {tag}",
+              "release_url": f"https://github.com/{owner}/{repo}/releases/tag/{tag}",
+              "download_url": f"https://github.com/{owner}/{repo}/releases/download/{tag}/TeleArchive.exe",
+              "sha256": sha,
+              "notes": notes,
+          }
+          manifest.write_text(json.dumps(doc, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+          PY
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch origin main
           git checkout main
           git pull origin main
-          cp "$MANIFEST" version.json
           git add version.json
           git diff --staged --quiet && echo "version.json unchanged on main" && exit 0
           git commit -m "chore: update version.json for ${{ github.ref_name }}"

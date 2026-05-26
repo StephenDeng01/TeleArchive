@@ -154,20 +154,24 @@ def _normalize_sha256(value: Any) -> str | None:
     return None
 
 
-def resolve_release_sha256(release: ReleaseInfo, *, timeout: float = 20.0) -> ReleaseInfo:
-    """Fill missing sha256 from Release sidecar asset when manifest is stale."""
-    if release.sha256:
-        return release
-    sha: str | None = None
+def _sidecar_sha256_for_release(release: ReleaseInfo, *, timeout: float) -> str | None:
     if release.download_url:
         sha = _try_fetch_sha256_sidecar(release.download_url, timeout=timeout)
-    if not sha and release.tag:
-        sha = _try_fetch_sha256_sidecar(
+        if sha:
+            return sha
+    if release.tag:
+        return _try_fetch_sha256_sidecar(
             f"https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}/releases/download/{release.tag}/TeleArchive.exe",
             timeout=timeout,
         )
-    if sha:
-        return replace(release, sha256=sha)
+    return None
+
+
+def resolve_release_sha256(release: ReleaseInfo, *, timeout: float = 20.0) -> ReleaseInfo:
+    """Prefer Release .sha256 sidecar over manifest (manifest may be stale after re-runs)."""
+    sidecar = _sidecar_sha256_for_release(release, timeout=timeout)
+    if sidecar:
+        return replace(release, sha256=sidecar)
     return release
 
 
@@ -222,15 +226,16 @@ def _release_from_payload(payload: dict[str, Any]) -> ReleaseInfo:
                 download_url = str(asset.get("browser_download_url") or "") or None
                 break
 
-    sha256 = _normalize_sha256(payload.get("sha256"))
-
-    if not sha256 and isinstance(download_url, str) and download_url:
-        sha256 = _try_fetch_sha256_sidecar(download_url, timeout=8.0)
-    if not sha256 and tag:
-        sha256 = _try_fetch_sha256_sidecar(
+    manifest_sha = _normalize_sha256(payload.get("sha256"))
+    sidecar_sha: str | None = None
+    if isinstance(download_url, str) and download_url:
+        sidecar_sha = _try_fetch_sha256_sidecar(download_url, timeout=8.0)
+    if not sidecar_sha and tag:
+        sidecar_sha = _try_fetch_sha256_sidecar(
             f"https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}/releases/download/{tag}/TeleArchive.exe",
             timeout=8.0,
         )
+    sha256 = sidecar_sha or manifest_sha
 
     if not version:
         raise ValueError("Release metadata incomplete")
