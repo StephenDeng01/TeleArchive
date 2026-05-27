@@ -88,12 +88,33 @@ class TeleArchiveWindow(QtWidgets.QMainWindow):
         # Left column
         left_layout = QtWidgets.QVBoxLayout(left)
 
-        title = QtWidgets.QLabel("TeleArchive")
+        title = QtWidgets.QLabel(
+            "<span style='color:#2490ff;'>Tele</span>"
+            "<span style='color:#111111;'>Archive</span>"
+        )
+        title.setTextFormat(QtCore.Qt.RichText)
         title.setFont(QtGui.QFont("Segoe UI", 18, QtGui.QFont.Bold))
         subtitle = QtWidgets.QLabel("Telegram 群聊归档与合并（Qt 版）")
         subtitle.setFont(QtGui.QFont("Segoe UI", 10))
+        logo_path = Path(__file__).resolve().parent / "assets" / "logo.svg"
+        logo_label = QtWidgets.QLabel()
+        logo_label.setFixedSize(36, 36)
+        logo_pix = QtGui.QPixmap(str(logo_path))
+        if not logo_pix.isNull():
+            logo_label.setPixmap(
+                logo_pix.scaled(
+                    36,
+                    36,
+                    QtCore.Qt.KeepAspectRatio,
+                    QtCore.Qt.SmoothTransformation,
+                )
+            )
+        title_row = QtWidgets.QHBoxLayout()
+        title_row.addWidget(logo_label)
+        title_row.addWidget(title)
+        title_row.addStretch(1)
         header_box = QtWidgets.QVBoxLayout()
-        header_box.addWidget(title)
+        header_box.addLayout(title_row)
         header_box.addWidget(subtitle)
         head_widget = QtWidgets.QWidget()
         head_widget.setLayout(header_box)
