@@ -1,10 +1,20 @@
-"""Entry point: GUI by default, CLI when arguments are provided."""
+"""Entry point: Qt GUI by default, CLI when arguments are provided."""
 
 from __future__ import annotations
 
 import sys
 
-from telearchive.gui import launch_gui, should_launch_gui
+from telearchive.gui_qt import launch_qt_gui
+
+
+def should_launch_gui(argv: list[str] | None = None) -> bool:
+    """True when the app should open the desktop UI instead of the CLI."""
+    args = argv if argv is not None else sys.argv[1:]
+    if not args:
+        return True
+    if args == ["--gui"] or args == ["gui"]:
+        return True
+    return False
 
 
 def main() -> None:
@@ -13,7 +23,7 @@ def main() -> None:
         argv = argv[1:]
 
     if should_launch_gui(argv):
-        launch_gui()
+        launch_qt_gui()
         return
 
     sys.argv = [sys.argv[0], *argv]

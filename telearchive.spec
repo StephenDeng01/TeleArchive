@@ -13,15 +13,16 @@ _tg_assets = Path(telearchive.__file__).resolve().parent / "assets" / "tg_export
 hiddenimports = (
     collect_submodules("rich")
     + collect_submodules("typer")
-    + collect_submodules("webview")
+    + collect_submodules("PySide6")
+    + collect_submodules("PySide6.QtWebEngineCore")
+    + collect_submodules("PySide6.QtWebEngineWidgets")
     + [
     "click",
     "shellingham",
     "sqlite3",
-    "tkinter",
     "telearchive",
     "telearchive.cli",
-    "telearchive.gui",
+    "telearchive.gui_qt",
     "telearchive.db",
     "telearchive.merge",
     "telearchive.parser",
@@ -35,9 +36,6 @@ hiddenimports = (
     "telearchive.export_dates",
     "telearchive.export_chat",
     "telearchive.html_board",
-    "telearchive.board_browser",
-    "telearchive.board_embed",
-    "telearchive.webview2_runtime",
 ]
 )
 

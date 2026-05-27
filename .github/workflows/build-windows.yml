@@ -41,11 +41,7 @@ jobs:
           $h = (Get-FileHash -Algorithm SHA256 dist\TeleArchive.exe).Hash.ToLower()
           if ($h -notmatch '^[0-9a-f]{64}$') { throw "invalid sha256: $h" }
           Set-Content -NoNewline -Encoding ascii dist\TeleArchive.exe.sha256 $h
-          pwsh -File scripts/fetch_webview2_runtime.ps1 -OutDir dist/WebView2Runtime
-          if (-not (Test-Path dist/WebView2Runtime/msedgewebview2.exe)) {
-            throw "WebView2Runtime bundle missing msedgewebview2.exe"
-          }
-          Compress-Archive -Path dist/TeleArchive.exe, dist/TeleArchive.exe.sha256, dist/WebView2Runtime -DestinationPath dist/TeleArchive-win64.zip -Force
+          Compress-Archive -Path dist/TeleArchive.exe, dist/TeleArchive.exe.sha256 -DestinationPath dist/TeleArchive-win64.zip -Force
           Get-ChildItem dist | Format-Table Name, Length
 
       - name: Upload artifact
@@ -56,7 +52,6 @@ jobs:
             dist/TeleArchive.exe
             dist/TeleArchive.exe.sha256
             dist/TeleArchive-win64.zip
-            dist/WebView2Runtime/**
           retention-days: 90
 
       - name: Write version manifest (with sha256)
