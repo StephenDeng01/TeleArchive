@@ -1,9 +1,9 @@
 {
-  "version": "0.8.1",
-  "tag": "v0.8.1",
-  "title": "TeleArchive v0.8.1",
-  "release_url": "https://github.com/StephenDeng01/TeleArchive/releases/tag/v0.8.1",
-  "download_url": "https://github.com/StephenDeng01/TeleArchive/releases/download/v0.8.1/TeleArchive.exe",
-  "sha256": "c17ae58a23359cf65c876fa09943a3b1478988ef36d2a17b72ebe6c863078f4b",
+  "version": "0.8.2",
+  "tag": "v0.8.2",
+  "title": "TeleArchive v0.8.2",
+  "release_url": "https://github.com/StephenDeng01/TeleArchive/releases/tag/v0.8.2",
+  "download_url": "https://github.com/StephenDeng01/TeleArchive/releases/download/v0.8.2/TeleArchive.exe",
+  "sha256": "86eb3e007f2fba8dcff630661d142e2817ac6b7fa274f02c44d60699e0f82523",
   "notes": "看板媒体预览、UTC+8 精确时间范围、导出快捷按钮。"
 }
