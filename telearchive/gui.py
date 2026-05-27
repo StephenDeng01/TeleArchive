@@ -734,6 +734,7 @@ class TeleArchiveApp(tk.Tk):
             try:
                 self._board_embed.load_file(html_path)
                 self._log("看板已在内嵌 WebView2 中加载。")
+                self.after(2200, self._verify_embedded_board_ready)
             except Exception as exc:  # noqa: BLE001
                 messagebox.showerror("内嵌看板失败", str(exc))
                 self._log(f"内嵌看板失败: {exc}")
@@ -779,10 +780,25 @@ class TeleArchiveApp(tk.Tk):
         self._board_bundle_dir = None
         self.board_status.configure(text="未加载")
 
+    def _verify_embedded_board_ready(self) -> None:
+        if self._board_embed is None or self._board_loaded_file is None:
+            return
+        if self._board_embed.is_attached():
+            return
+        note = self._board_embed.last_error() or "内嵌失败，自动切换到系统浏览器。"
+        self._log(f"看板内嵌失败: {note}")
+        try:
+            browser_note = show_board_html(self._board_loaded_file)
+            self._log(browser_note)
+            self.board_status.configure(text=f"{self.board_status.cget('text')} | 浏览器兜底")
+        except Exception as exc:  # noqa: BLE001
+            self._log(f"浏览器兜底也失败: {exc}")
+
     def _on_close(self) -> None:
         if self._board_embed is not None:
             self._board_embed.shutdown()
-        self.destroy()
+        self.quit()
+        self.after(80, self.destroy)
 
     def _warmup_html_cache_async(self, chat_id: int) -> None:
         db_path = Path(self.db_path.get())

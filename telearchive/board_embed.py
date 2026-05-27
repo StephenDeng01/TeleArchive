@@ -199,6 +199,7 @@ class EmbeddedBoardFrame:
         self._host_title = f"TeleArchiveBoard_{id(self)}"
         self._child_hwnd = 0
         self._attached = False
+        self._last_error = ""
         self._pending_url: str | None = None
         self._attach_attempts = 0
 
@@ -256,6 +257,7 @@ class EmbeddedBoardFrame:
         _user32.ShowWindow(hwnd, _SW_SHOW)
         self._child_hwnd = hwnd
         self._attached = True
+        self._last_error = ""
         self._resize_child()
 
     def _on_configure(self, _event: object = None) -> None:
@@ -287,17 +289,19 @@ class EmbeddedBoardFrame:
         self._on_destroy()
 
     def _on_destroy(self, _event: object = None) -> None:
-        with _WEBVIEW_LOCK:
-            window = _WEBVIEW_WINDOW
-        if window is not None:
-            try:
-                window.destroy()
-            except Exception:  # noqa: BLE001
-                pass
+        # Do not synchronously destroy WebView here; that can block tkinter close
+        # for several seconds on some Windows machines.
         self._child_hwnd = 0
         self._attached = False
 
+    def is_attached(self) -> bool:
+        return self._attached
+
+    def last_error(self) -> str:
+        return self._last_error
+
     def _show_error(self, message: str) -> None:
+        self._last_error = message
         for child in self.frame.winfo_children():
             child.destroy()
         label = self._tk.Label(
