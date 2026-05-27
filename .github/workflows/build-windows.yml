@@ -89,9 +89,9 @@ jobs:
               "sha256": sha,
               "notes": notes,
           }
-          manifest.write_text(json.dumps(doc, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+          # Do not write version.json here (detached tag checkout); push step updates main.
           Path(os.environ["RUNNER_TEMP"]).joinpath("telearchive-version.json").write_text(
-              manifest.read_text(encoding="utf-8"), encoding="utf-8"
+              json.dumps(doc, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
           )
           PY
 
@@ -135,6 +135,8 @@ jobs:
           export SHA
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Tag checkout may have modified version.json in an earlier step; discard before switching branch.
+          git restore version.json 2>/dev/null || git checkout -- version.json || true
           git fetch origin main
           git checkout main
           git pull --ff-only origin main
