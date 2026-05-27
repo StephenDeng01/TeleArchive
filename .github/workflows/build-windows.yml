@@ -38,10 +38,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install ".[build]"
           pyinstaller --noconfirm --clean telearchive.spec
+          $version = (python -c "import telearchive; print(telearchive.__version__)")
+          $zipName = "TeleArchive-$version-win64.zip"
           $h = (Get-FileHash -Algorithm SHA256 dist\TeleArchive.exe).Hash.ToLower()
           if ($h -notmatch '^[0-9a-f]{64}$') { throw "invalid sha256: $h" }
           Set-Content -NoNewline -Encoding ascii dist\TeleArchive.exe.sha256 $h
-          Compress-Archive -Path dist/TeleArchive.exe, dist/TeleArchive.exe.sha256 -DestinationPath dist/TeleArchive-win64.zip -Force
+          Compress-Archive -Path dist/TeleArchive.exe, dist/TeleArchive.exe.sha256 -DestinationPath "dist/$zipName" -Force
+          echo "ZIP_NAME=$zipName" >> $env:GITHUB_ENV
           Get-ChildItem dist | Format-Table Name, Length
 
       - name: Upload artifact
@@ -51,7 +54,7 @@ jobs:
           path: |
             dist/TeleArchive.exe
             dist/TeleArchive.exe.sha256
-            dist/TeleArchive-win64.zip
+            dist/TeleArchive-*-win64.zip
           retention-days: 90
 
       - name: Write version manifest (with sha256)
@@ -96,10 +99,11 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
+          name: TeleArchive ${{ github.ref_name }}
           files: |
             dist/TeleArchive.exe
             dist/TeleArchive.exe.sha256
-            dist/TeleArchive-win64.zip
+            dist/TeleArchive-*-win64.zip
           fail_on_unmatched_files: true
           generate_release_notes: true
 
@@ -185,5 +189,6 @@ jobs:
           files: |
             dist/TeleArchive.exe
             dist/TeleArchive.exe.sha256
+            dist/TeleArchive-*-win64.zip
           fail_on_unmatched_files: true
           generate_release_notes: true

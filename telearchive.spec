@@ -3,7 +3,11 @@
 
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+from PyInstaller.utils.hooks import (
+    collect_data_files,
+    collect_dynamic_libs,
+    collect_submodules,
+)
 
 import telearchive
 
@@ -39,11 +43,15 @@ hiddenimports = (
 ]
 )
 
+_pyside6_datas = collect_data_files("PySide6", include_py_files=False)
+_pyside6_binaries = collect_dynamic_libs("PySide6")
+
 a = Analysis(
     ["telearchive/__main__.py"],
     pathex=[],
-    binaries=[],
+    binaries=_pyside6_binaries,
     datas=collect_data_files("telearchive")
+    + _pyside6_datas
     + [
         (str(_tg_assets / "css"), "telearchive/assets/tg_export/css"),
         (str(_tg_assets / "js"), "telearchive/assets/tg_export/js"),

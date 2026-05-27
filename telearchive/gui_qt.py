@@ -234,9 +234,9 @@ class TeleArchiveWindow(QtWidgets.QMainWindow):
                 QtCore.Q_ARG(str, "\n".join(lines)),
             )
 
-        threading = QtCore.QThread
-        t = threading(target=worker)  # type: ignore[call-arg]
-        t.setObjectName("ingest-thread")
+        import threading as _t
+
+        _t.Thread(target=worker, daemon=True).start()
 
     @QtCore.Slot(str)
     def _append_log(self, text: str) -> None:
@@ -311,6 +311,7 @@ class TeleArchiveWindow(QtWidgets.QMainWindow):
 
 
 def launch_qt_gui() -> None:
+    QtCore.QCoreApplication.setAttribute(QtCore.Qt.AA_ShareOpenGLContexts)
     app = QtWidgets.QApplication(sys.argv)
     window = TeleArchiveWindow()
     window.show()
