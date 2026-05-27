@@ -31,6 +31,30 @@ from telearchive.updater import (
     should_notify_update,
 )
 
+_BOUND_DISPLAY_FORMAT = "yyyy-MM-dd HH:mm:ss"
+_BOUND_STORAGE_FORMAT = "yyyy-MM-ddTHH:mm:ss"
+
+
+def _make_datetime_edit(default_text: str) -> QtWidgets.QDateTimeEdit:
+    edit = QtWidgets.QDateTimeEdit()
+    edit.setDisplayFormat(_BOUND_DISPLAY_FORMAT)
+    edit.setCalendarPopup(True)
+    edit.setMinimumWidth(170)
+    _set_datetime_edit_value(edit, default_text)
+    return edit
+
+
+def _set_datetime_edit_value(edit: QtWidgets.QDateTimeEdit, value: str) -> None:
+    dt = QtCore.QDateTime.fromString(value.strip(), _BOUND_STORAGE_FORMAT)
+    if not dt.isValid():
+        dt = QtCore.QDateTime.fromString(value.strip(), _BOUND_DISPLAY_FORMAT)
+    if dt.isValid():
+        edit.setDateTime(dt)
+
+
+def _datetime_edit_bound(edit: QtWidgets.QDateTimeEdit) -> str:
+    return edit.dateTime().toString(_BOUND_STORAGE_FORMAT)
+
 
 class TeleArchiveWindow(QtWidgets.QMainWindow):
     update_result_ready = QtCore.Signal(object, bool)
@@ -117,8 +141,8 @@ class TeleArchiveWindow(QtWidgets.QMainWindow):
         export_slice_box = QtWidgets.QGroupBox("按时间导出（Telegram JSON 格式）")
         export_slice_layout = QtWidgets.QVBoxLayout(export_slice_box)
         export_from_default, export_to_default = default_datetime_bounds()
-        self.export_from = QtWidgets.QLineEdit(export_from_default)
-        self.export_to = QtWidgets.QLineEdit(export_to_default)
+        self.export_from = _make_datetime_edit(export_from_default)
+        self.export_to = _make_datetime_edit(export_to_default)
         self.export_out = QtWidgets.QLineEdit(str(default_export_slice_dir().resolve()))
 
         time_row = QtWidgets.QHBoxLayout()
@@ -128,7 +152,7 @@ class TeleArchiveWindow(QtWidgets.QMainWindow):
         time_row.addWidget(self.export_to)
         export_slice_layout.addLayout(time_row)
 
-        hint = QtWidgets.QLabel("时间格式 YYYY-MM-DD 或 YYYY-MM-DDTHH:MM:SS（UTC+8）")
+        hint = QtWidgets.QLabel("点击选择日期与时间（UTC+8）")
         hint.setStyleSheet("color: #666666;")
         export_slice_layout.addWidget(hint)
 
@@ -178,11 +202,9 @@ class TeleArchiveWindow(QtWidgets.QMainWindow):
 
         top_row = QtWidgets.QHBoxLayout()
         top_row.addWidget(QtWidgets.QLabel("从"))
-        self.board_from = QtWidgets.QLineEdit()
-        self.board_to = QtWidgets.QLineEdit()
         f_default, t_default = default_datetime_bounds()
-        self.board_from.setText(f_default)
-        self.board_to.setText(t_default)
+        self.board_from = _make_datetime_edit(f_default)
+        self.board_to = _make_datetime_edit(t_default)
         top_row.addWidget(self.board_from)
         top_row.addWidget(QtWidgets.QLabel("到"))
         top_row.addWidget(self.board_to)
@@ -342,8 +364,8 @@ class TeleArchiveWindow(QtWidgets.QMainWindow):
             return
         out_dir = Path(out_dir_text).resolve()
         out_dir.mkdir(parents=True, exist_ok=True)
-        from_bound = self.export_from.text().strip()
-        to_bound = self.export_to.text().strip()
+        from_bound = _datetime_edit_bound(self.export_from)
+        to_bound = _datetime_edit_bound(self.export_to)
 
         def worker() -> None:
             try:
@@ -408,13 +430,13 @@ class TeleArchiveWindow(QtWidgets.QMainWindow):
 
     def _set_export_shortcut(self, name: str) -> None:
         start, end = set_shortcut_range(name)
-        self.export_from.setText(start)
-        self.export_to.setText(end)
+        _set_datetime_edit_value(self.export_from, start)
+        _set_datetime_edit_value(self.export_to, end)
 
     def _set_board_shortcut(self, name: str) -> None:
         start, end = set_shortcut_range(name)
-        self.board_from.setText(start)
-        self.board_to.setText(end)
+        _set_datetime_edit_value(self.board_from, start)
+        _set_datetime_edit_value(self.board_to, end)
         self._render_board()
 
     @QtCore.Slot()
@@ -430,8 +452,8 @@ class TeleArchiveWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.warning(self, "提示", "数据库不存在，请先导入聊天记录。")
             return
 
-        from_bound = self.board_from.text().strip()
-        to_bound = self.board_to.text().strip()
+        from_bound = _datetime_edit_bound(self.board_from)
+        to_bound = _datetime_edit_bound(self.board_to)
 
         def worker() -> None:
             try:
@@ -479,7 +501,8 @@ class TeleArchiveWindow(QtWidgets.QMainWindow):
         path = Path(html_path).resolve()
         self._board_loaded = True
         self.board_status.setText(
-            f"{chat_name} | {count} 条 | {self.board_from.text()} ~ {self.board_to.text()}"
+            f"{chat_name} | {count} 条 | "
+            f"{_datetime_edit_bound(self.board_from)} ~ {_datetime_edit_bound(self.board_to)}"
         )
         self.web.load(QtCore.QUrl.fromLocalFile(str(path)))
         self._log(f"看板已加载: {path}（TG 导出 HTML 文件夹）")
