@@ -429,6 +429,7 @@ def perform_in_app_update(release: ReleaseInfo) -> None:
 
     current_exe = Path(sys.executable).resolve()
     staging_dir = Path(tempfile.gettempdir()) / "telearchive-update"
+    staging_dir.mkdir(parents=True, exist_ok=True)
     new_exe = staging_dir / f"TeleArchive-{release.version}.exe"
     _download_file(release.download_url, new_exe)
 
@@ -454,7 +455,13 @@ def perform_in_app_update(release: ReleaseInfo) -> None:
     DETACHED_PROCESS = 0x00000008
     subprocess.Popen(
         [
-            "powershell.exe",
+            str(
+                Path(os.environ.get("SystemRoot", r"C:\Windows"))
+                / "System32"
+                / "WindowsPowerShell"
+                / "v1.0"
+                / "powershell.exe"
+            ),
             "-NoProfile",
             "-ExecutionPolicy",
             "Bypass",
@@ -488,7 +495,7 @@ def _build_windows_updater_script(
     script_path = _ps_single_quoted(
         str(Path(tempfile.gettempdir()) / "telearchive-update" / "apply_update.ps1")
     )
-    return f"""$ErrorActionPreference = 'SilentlyContinue'
+    return f"""$ErrorActionPreference = 'Stop'
 $Target = {exe}
 $Backup = {bak}
 $NewFile = {newf}
@@ -499,7 +506,11 @@ $SelfScript = {script_path}
 $ParentPid = {parent_pid}
 
 function Write-UpdateLog([string]$Message) {{
-    Add-Content -Path $LogFile -Value "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] $Message"
+    try {{
+        $dir = Split-Path -Parent $LogFile
+        if (-not (Test-Path -LiteralPath $dir)) {{ New-Item -ItemType Directory -Path $dir -Force | Out-Null }}
+        Add-Content -Path $LogFile -Value "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] $Message"
+    }} catch {{ }}
 }}
 
 function Clear-PyiExtracts([string]$Root) {{
@@ -509,45 +520,72 @@ function Clear-PyiExtracts([string]$Root) {{
     }}
 }}
 
-Write-UpdateLog "updater started pid=$ParentPid"
+function Start-App([string]$Path, [string]$WorkDir) {{
+    try {{
+        $p = Start-Process -LiteralPath $Path -WorkingDirectory $WorkDir -PassThru
+        if ($null -ne $p) {{
+            Write-UpdateLog "started pid=$($p.Id)"
+            return $true
+        }}
+    }} catch {{
+        Write-UpdateLog "Start-Process failed: $($_.Exception.Message)"
+    }}
+    try {{
+        $cmd = 'start "" /D "{0}" "{1}"' -f $WorkDir, $Path
+        cmd.exe /c $cmd | Out-Null
+        Write-UpdateLog "fallback cmd start issued"
+        return $true
+    }} catch {{
+        Write-UpdateLog "fallback cmd start failed: $($_.Exception.Message)"
+        return $false
+    }}
+}}
 
 try {{
-    Wait-Process -Id $ParentPid -Timeout 120 -ErrorAction Stop
-    Write-UpdateLog "parent process exited"
-}} catch {{
-    Write-UpdateLog "wait-process finished: $($_.Exception.Message)"
-}}
+    Write-UpdateLog "updater started pid=$ParentPid"
+    try {{
+        Wait-Process -Id $ParentPid -Timeout 120
+        Write-UpdateLog "parent process exited"
+    }} catch {{
+        Write-UpdateLog "Wait-Process finished: $($_.Exception.Message)"
+    }}
 
-Start-Sleep -Seconds 3
-Clear-PyiExtracts $ExeDir
-Clear-PyiExtracts $PyiRoot
+    Start-Sleep -Seconds 3
+    Clear-PyiExtracts $ExeDir
+    Clear-PyiExtracts $PyiRoot
 
-$attempt = 0
-while ($attempt -lt 120) {{
-    Start-Sleep -Seconds 1
-    $attempt++
-    if (Test-Path -LiteralPath $Backup) {{ Remove-Item -LiteralPath $Backup -Force }}
+    $attempt = 0
+    while ($attempt -lt 120) {{
+        Start-Sleep -Seconds 1
+        $attempt++
+        if (Test-Path -LiteralPath $Backup) {{ Remove-Item -LiteralPath $Backup -Force }}
+        if (Test-Path -LiteralPath $Target) {{
+            Move-Item -LiteralPath $Target -Destination $Backup -Force
+        }}
+        if (-not (Test-Path -LiteralPath $Target)) {{ break }}
+    }}
+
     if (Test-Path -LiteralPath $Target) {{
-        Move-Item -LiteralPath $Target -Destination $Backup -Force
+        Write-UpdateLog "replace timeout, restoring backup"
+        if (Test-Path -LiteralPath $Backup) {{ Start-App $Backup $ExeDir | Out-Null }}
+        throw "replace timeout"
     }}
-    if (-not (Test-Path -LiteralPath $Target)) {{ break }}
-}}
 
-if (Test-Path -LiteralPath $Target) {{
-    Write-UpdateLog "replace timeout, restoring backup"
-    if (Test-Path -LiteralPath $Backup) {{
-        Start-Process -LiteralPath $Backup -WorkingDirectory $ExeDir
+    Move-Item -LiteralPath $NewFile -Destination $Target -Force
+    Clear-PyiExtracts $ExeDir
+    Clear-PyiExtracts $PyiRoot
+
+    if (-not (Start-App $Target $ExeDir)) {{
+        throw "failed to start updated app"
     }}
+
+    Write-UpdateLog "update applied successfully"
+    if (Test-Path -LiteralPath $Backup) {{ Remove-Item -LiteralPath $Backup -Force }}
     Remove-Item -LiteralPath $SelfScript -Force
+    exit 0
+}} catch {{
+    Write-UpdateLog "FATAL: $($_.Exception.Message)"
+    try {{ Remove-Item -LiteralPath $SelfScript -Force }} catch {{ }}
     exit 1
 }}
-
-Move-Item -LiteralPath $NewFile -Destination $Target -Force
-Clear-PyiExtracts $ExeDir
-Clear-PyiExtracts $PyiRoot
-Start-Process -LiteralPath $Target -WorkingDirectory $ExeDir
-Write-UpdateLog "relaunched $Target"
-if (Test-Path -LiteralPath $Backup) {{ Remove-Item -LiteralPath $Backup -Force }}
-Remove-Item -LiteralPath $SelfScript -Force
-exit 0
 """
