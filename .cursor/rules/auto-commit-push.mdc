@@ -28,11 +28,15 @@ alwaysApply: true
 2. `pyproject.toml` → `version = "X.Y.Z"`
 3. tag 名称 `vX.Y.Z`
 
+**不要**在功能 commit 里手动改 `version.json`（sha256 只有 CI 构建完成后才知道）。`version.json` 由 GitHub Actions 在 tag 构建成功后自动 push 到 `main`，供应用内更新读取。
+
 ## Tag 与 Release 规则
 
 - 每次 push 变更后，**自动在 commit 上打 patch tag**（如 `v0.8.3`），并推送到 origin。
 - Tag 推送会触发 GitHub Actions 自动构建并发布 GitHub Release。
 - Release 标题格式：`TeleArchive vX.Y.Z`；zip 资产命名：`TeleArchive-X.Y.Z-win64.zip`。
+- CI 绿后须确认 `main` 上已有 `chore: update version.json for vX.Y.Z` 提交；必要时 `git pull` 同步本地。
+- 应用内更新依赖 `version.json` + GitHub Releases API；manifest 未更新时旧版客户端可能检测不到新版本。
 - **禁止** force push 已推送的 tag，如需修正须先报告错误，由用户决定。
 
 ## Git 安全协议
@@ -51,7 +55,9 @@ alwaysApply: true
 3. 撰写 1–2 句 commit message，说明「为什么」
 4. `git add` → `git commit` → `git push origin HEAD`
 5. `git tag vX.Y.Z` → `git push origin vX.Y.Z`
-6. `git status` 确认工作区干净、推送成功
+6. 等待 CI 完成，确认 `main` 上 `version.json` 已更新为新版本（含正确 sha256）
+7. `git pull origin main` 同步本地 `version.json`
+8. `git status` 确认工作区干净、推送成功
 
 ## Commit Message 风格
 
