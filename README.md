@@ -11,7 +11,7 @@
 [![Release](https://img.shields.io/github/v/release/StephenDeng01/TeleArchive?style=flat-square&logo=github&label=Release)](https://github.com/StephenDeng01/TeleArchive/releases)
 [![Python](https://img.shields.io/badge/Python-3.9+-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![SQLite](https://img.shields.io/badge/Storage-SQLite-003B57?style=flat-square&logo=sqlite&logoColor=white)](https://www.sqlite.org/)
-[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-555?style=flat-square&logo=windows&logoColor=white)]()
+[![Platform](https://img.shields.io/badge/Platform-Windows-555?style=flat-square&logo=windows&logoColor=white)]()
 
 [🚀 快速开始](#-快速开始) · [🪟 Windows 下载](#-windows-用户) · [⚙️ 工作原理](#️-工作原理) · [📊 数据分析](#-数据分析) · [🛠 参与开发](#-参与开发)
 
@@ -33,6 +33,7 @@ TeleArchive 面向 **无法使用 Telegram Bot / 官方 API**，但仍需长期�
 | 🛡️ | **保留**较新导出中已消失、但旧导出仍保留的消息（并集策略） |
 | 🖼️ | **索引**图片、视频等媒体文件的磁盘路径，并识别跨批次重命名的同一附件 |
 | 🗄️ | **输出**标准 SQLite 数据库，支持 SQL、Python、pandas 等任意分析方式 |
+| 🌐 | **内嵌看板**：Qt 原生 WebEngine 渲染 Telegram 风格 HTML，无需外部浏览器 |
 
 🔒 全程离线运行，数据不离开本机。
 
@@ -55,9 +56,10 @@ TeleArchive 面向 **无法使用 Telegram Bot / 官方 API**，但仍需长期�
 - 🔑 **稳定去重** — 以 `(chat_id, message_id)` 为唯一键，与 Telegram 导出规范一致
 - 📎 **媒体感知** — 解析 JSON 相对路径，校验文件存在，按内容哈希关联跨批次附件
 - 🧭 **批次可追溯** — 记录每条消息的首次来源导出与导入历史
-- 🕳️ **缺口分析** — `gaps` 命令识别 message ID 序列空洞，辅助判断删消息区间
-- 🔔 **更新提醒** — 启动时检查 GitHub 新版本，可选更新、可「不再提示此版本」
-- 📥 **开箱即用** — Windows 提供图形界面，双击即可使用；亦支持命令行与 pip 安装
+- 🌐 **内嵌看板** — 使用 Qt WebEngine 渲染 Telegram 原生 HTML，支持图片、贴纸、emoji
+- 📅 **时间范围** — 看板与导出均支持 UTC+8 精确到秒；五个快捷按钮（今天/近三天/近一周/近一月/全部）
+- 🔔 **更新提醒** — 启动时自动检查 GitHub 新版本，支持应用内一键更新（SHA256 校验）
+- 📥 **开箱即用** — Windows 单文件 `.exe`，双击即可使用；无需 Python 环境、无需 WebView2
 
 ---
 
@@ -66,7 +68,7 @@ TeleArchive 面向 **无法使用 Telegram Bot / 官方 API**，但仍需长期�
 ### 📌 环境要求
 
 - [Telegram Desktop](https://desktop.telegram.org/) **≥ 4.15.2**（支持 JSON 格式导出）
-- Python **3.9+**（源码安装时）
+- Python **3.9+**（仅源码安装时需要）
 
 ### 📤 导出聊天记录
 
@@ -89,7 +91,15 @@ ChatExport_2026-05-26/
 
 ### 📥 安装
 
-**方式 A — 从源码安装（推荐开发者）**
+**方式 A — Windows 桌面版（推荐普通用户）**
+
+1. 前往 [Releases](https://github.com/StephenDeng01/TeleArchive/releases) 下载最新版 **`TeleArchive.exe`**
+2. **双击运行**，无需安装 Python，无需命令行
+3. 在界面中添加导出文件夹 → 点击 **「导入合并」**
+
+详见 [Windows 用户](#-windows-用户)。
+
+**方式 B — 从源码安装（开发者）**
 
 ```bash
 git clone https://github.com/StephenDeng01/TeleArchive.git
@@ -98,14 +108,6 @@ python3 -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -e .
 ```
-
-**方式 B — Windows 桌面版（推荐普通用户）**
-
-1. 前往 [Releases](https://github.com/StephenDeng01/TeleArchive/releases) 下载 **`TeleArchive.exe`**
-2. **双击运行**，无需安装 Python，无需命令行
-3. 在界面中添加导出文件夹 → 点击 **「导入合并」**
-
-详见 [Windows 用户](#-windows-用户)。
 
 ### ⌨️ 基本用法
 
@@ -216,20 +218,17 @@ telearchive export ./export_slice --from 2026-05-01 --to 2026-05-31 --no-media
 telearchive export ./export_slice --chat-id 2837935940 --from 2026-05-20 --to 2026-05-26
 ```
 
-图形界面底部提供 **「按时间导出」** 区域，填写起止日期与输出目录即可。
-
-在未指定输出目录时，GUI 默认使用 `E:/tg_export/export_slice`（若不可用则回退并创建 `exports/export_slice`）。
+图形界面左侧提供 **「按时间导出」** 区域，填写起止时间与输出目录，并有五个快捷按钮（今天、近三天、近一周、近一月、全部消息）即可一键导出。
 
 ### 🔔 更新提醒
 
-- 启动图形界面后，会自动检查 [GitHub Releases](https://github.com/StephenDeng01/TeleArchive/releases) 是否有新版本
+- 启动图形界面后，自动检查 [GitHub Releases](https://github.com/StephenDeng01/TeleArchive/releases) 是否有新版本
 - **不强制更新**：可继续使用当前版本
 - **立即更新（Windows）**：下载新版本后执行 SHA256 校验，通过后静默替换并自动重启
-- **稍后提醒**：关闭对话框，下次启动仍会提示
-- **不再提示此版本**：仅忽略当前最新版；发布更新的版本后会再次提醒
+- **稍后**：关闭对话框，下次启动仍会提示
 - 偏好保存在 `data/settings.json`
 
-`version.json` 中包含 `sha256` 字段；应用仅在存在且校验通过时执行“立即更新”。
+`version.json` 中包含 `sha256` 字段；应用仅在存在且校验通过时执行"立即更新"。
 
 命令行手动检查：
 
@@ -307,20 +306,31 @@ df = pd.read_sql("SELECT * FROM messages WHERE chat_id = ?", conn, params=(chat_
 ### ⬇️ 下载
 
 1. 打开 [Releases](https://github.com/StephenDeng01/TeleArchive/releases)
-2. 下载 **`TeleArchive.exe`**（单文件，免安装，约 15–25 MB）
+2. 下载 **`TeleArchive.exe`**（单文件，免安装，约 50–80 MB，含 Qt WebEngine）
+3. **无需安装 Python、无需 WebView2、无需其他依赖**，双击即可运行
 
-### 🖥️ 图形界面（推荐）
+### 🖥️ 图形界面操作流程
 
-**双击 `TeleArchive.exe`** 即可打开，无需命令行：
+**双击 `TeleArchive.exe`** 打开，界面分为左右两栏：
 
-1. **添加文件夹** — 选择 Telegram 导出的 `ChatExport_*` 目录，或点「添加多个」选父文件夹自动发现
-2. **导入合并** — 一键合并去重，结果写入数据库
-3. **查看状态** — 消息总数、媒体索引、导入历史
-4. **缺口分析** — 查看因自动删消息造成的 ID 空洞
-5. **检查更新** — 查看是否有新版本（可选提醒，不强制更新）
-6. **按时间导出** — 导出为原生 Telegram JSON 目录，便于二次分析或分享
+**左栏 — 操作区**
 
-数据库路径可在界面顶部修改（默认 `E:\tg_chat_history\telearchive.db`，不可用则回退本地 `data/telearchive.db`）。
+| 步骤 | 操作 |
+|------|------|
+| 1 | **选择数据库** — 默认 `E:\tg_chat_history\telearchive.db`；点「浏览」可更改 |
+| 2 | **添加导出文件夹** — 选择 `ChatExport_*` 目录，支持多个 |
+| 3 | **初始化数据库** — 首次使用时点击创建表结构（已存在时自动提示跳过） |
+| 4 | **导入合并** — 一键将选中文件夹去重合并入库 |
+| 5 | **检查更新** — 查看是否有新版本，可选一键更新 |
+| 6 | **按时间导出** — 填写起止时间与输出目录，或点快捷按钮，再点「导出」 |
+
+**右栏 — 聊天看板**
+
+- 使用 **Qt WebEngine** 内嵌渲染 Telegram 风格 HTML，支持图片、贴纸、emoji、视频缩略图
+- 填写时间范围，或点击 **今天 / 近三天 / 近一周 / 近一月 / 全部消息** 快捷按钮
+- 点击 **「刷新预览」** 生成并加载看板，结果缓存于本地
+
+> ⏱️ **时间格式**：`YYYY-MM-DD` 或 `YYYY-MM-DDTHH:MM:SS`，均为 **UTC+8**
 
 ### ⌨️ 命令行（高级）
 
@@ -337,18 +347,22 @@ df = pd.read_sql("SELECT * FROM messages WHERE chat_id = ?", conn, params=(chat_
 ```powershell
 git clone https://github.com/StephenDeng01/TeleArchive.git
 cd TeleArchive
-.\scripts\build_windows.ps1
+pip install ".[build]"
+pyinstaller --noconfirm --clean telearchive.spec
 # 输出: dist\TeleArchive.exe
 ```
 
 ### 🚢 发布新版本（维护者）
 
+1. 更新 `telearchive/__init__.py` 和 `pyproject.toml` 中的版本号
+2. 推送 tag：
+
 ```bash
-git tag v0.2.0
-git push origin v0.2.0
+git tag v0.9.0
+git push origin v0.9.0
 ```
 
-推送 `v*` 标签后，GitHub Actions 将自动构建并发布至 Releases。亦可于 **Actions → Build Windows exe** 手动触发工作流。
+推送 `v*` 标签后，GitHub Actions 将自动构建并发布至 Releases，附带 `TeleArchive.exe`、`TeleArchive.exe.sha256`、`TeleArchive-X.Y.Z-win64.zip`。
 
 ---
 
@@ -359,12 +373,20 @@ pip install -e ".[dev]"
 pytest
 ```
 
-构建 Windows 安装包依赖：
+构建 Windows 安装包：
 
 ```bash
 pip install -e ".[build]"
 pyinstaller telearchive.spec
 ```
+
+依赖说明：
+
+| 包 | 说明 |
+|----|------|
+| `PySide6` | Qt 6 Python 绑定（GUI 框架） |
+| `PySide6-Addons` | 含 QtWebEngine（内嵌 HTML 看板） |
+| `click` / `typer` / `rich` | CLI 框架与终端输出 |
 
 ---
 
@@ -372,6 +394,7 @@ pyinstaller telearchive.spec
 
 - 📄 [Telegram Data Export Schema](https://core.telegram.org/import-export) — 官方 JSON 导出字段说明
 - 💬 [Telegram Desktop](https://desktop.telegram.org/) — 客户端下载
+- 🖼️ [Qt for Python (PySide6)](https://doc.qt.io/qtforpython-6/) — GUI 框架文档
 
 ---
 

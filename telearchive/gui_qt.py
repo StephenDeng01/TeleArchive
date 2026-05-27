@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import sys
+import threading
+import webbrowser
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -25,9 +27,18 @@ from telearchive.paths import (
     default_export_slice_dir,
     default_html_cache_dir,
 )
+from telearchive.updater import (
+    ReleaseInfo,
+    UpdateCheckResult,
+    check_for_update,
+    perform_in_app_update,
+    should_notify_update,
+)
 
 
 class TeleArchiveWindow(QtWidgets.QMainWindow):
+    update_result_ready = QtCore.Signal(object, bool)
+
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle(f"TeleArchive Qt v{__version__}")
@@ -36,8 +47,10 @@ class TeleArchiveWindow(QtWidgets.QMainWindow):
         self.db_path = default_db_path().resolve()
         self.export_paths: list[Path] = []
         self.html_cache_dir = default_html_cache_dir().resolve()
+        self.update_result_ready.connect(self._on_update_result_ready)
 
         self._build_ui()
+        QtCore.QTimer.singleShot(800, self._check_update_on_startup)
 
     # --- UI -----------------------------------------------------------------
 
@@ -96,12 +109,60 @@ class TeleArchiveWindow(QtWidgets.QMainWindow):
         self.btn_init.clicked.connect(self._init_db)
         self.btn_ingest = QtWidgets.QPushButton("导入合并")
         self.btn_ingest.clicked.connect(self._run_ingest)
-        self.btn_export = QtWidgets.QPushButton("按时间导出")
-        self.btn_export.clicked.connect(self._run_export)
+        self.btn_update = QtWidgets.QPushButton("检查更新")
+        self.btn_update.clicked.connect(self._check_update_manual)
         action_row.addWidget(self.btn_init)
         action_row.addWidget(self.btn_ingest)
-        action_row.addWidget(self.btn_export)
+        action_row.addWidget(self.btn_update)
         left_layout.addLayout(action_row)
+
+        # Export by time
+        export_slice_box = QtWidgets.QGroupBox("按时间导出（Telegram JSON 格式）")
+        export_slice_layout = QtWidgets.QVBoxLayout(export_slice_box)
+        export_from_default, export_to_default = default_datetime_bounds()
+        self.export_from = QtWidgets.QLineEdit(export_from_default)
+        self.export_to = QtWidgets.QLineEdit(export_to_default)
+        self.export_out = QtWidgets.QLineEdit(str(default_export_slice_dir().resolve()))
+
+        time_row = QtWidgets.QHBoxLayout()
+        time_row.addWidget(QtWidgets.QLabel("从"))
+        time_row.addWidget(self.export_from)
+        time_row.addWidget(QtWidgets.QLabel("到"))
+        time_row.addWidget(self.export_to)
+        export_slice_layout.addLayout(time_row)
+
+        hint = QtWidgets.QLabel("时间格式 YYYY-MM-DD 或 YYYY-MM-DDTHH:MM:SS（UTC+8）")
+        hint.setStyleSheet("color: #666666;")
+        export_slice_layout.addWidget(hint)
+
+        shortcut_row = QtWidgets.QHBoxLayout()
+        for label, key in (
+            ("今天", "today"),
+            ("近三天", "3d"),
+            ("近一周", "7d"),
+            ("近一月", "30d"),
+            ("全部消息", "all"),
+        ):
+            btn = QtWidgets.QPushButton(label)
+            btn.clicked.connect(lambda _=False, k=key: self._set_export_shortcut(k))
+            shortcut_row.addWidget(btn)
+        export_slice_layout.addLayout(shortcut_row)
+
+        out_row = QtWidgets.QHBoxLayout()
+        out_row.addWidget(QtWidgets.QLabel("输出目录"))
+        out_row.addWidget(self.export_out, 1)
+        browse_export_btn = QtWidgets.QPushButton("浏览…")
+        browse_export_btn.clicked.connect(self._browse_export_dir)
+        out_row.addWidget(browse_export_btn)
+        export_slice_layout.addLayout(out_row)
+
+        export_btn_row = QtWidgets.QHBoxLayout()
+        export_btn_row.addStretch(1)
+        self.btn_export = QtWidgets.QPushButton("导出")
+        self.btn_export.clicked.connect(self._run_export)
+        export_btn_row.addWidget(self.btn_export)
+        export_slice_layout.addLayout(export_btn_row)
+        left_layout.addWidget(export_slice_box)
 
         # Log
         log_box = QtWidgets.QGroupBox("运行日志")
@@ -193,6 +254,12 @@ class TeleArchiveWindow(QtWidgets.QMainWindow):
     def _init_db(self) -> None:
         self.db_path = Path(self.db_edit.text()).resolve()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        if self.db_path.exists():
+            QtWidgets.QMessageBox.information(
+                self, "提示", f"数据库已存在，无需重复初始化：\n{self.db_path}"
+            )
+            self._log(f"数据库已存在，跳过初始化: {self.db_path}")
+            return
         with Database(self.db_path) as db:
             db.migrate()
         self._log(f"数据库已初始化: {self.db_path}")
@@ -251,22 +318,27 @@ class TeleArchiveWindow(QtWidgets.QMainWindow):
     def _show_info(self, text: str) -> None:
         QtWidgets.QMessageBox.information(self, "导出完成", text)
 
+    def _browse_export_dir(self) -> None:
+        base = Path(self.export_out.text().strip() or str(default_export_slice_dir())).resolve()
+        base.mkdir(parents=True, exist_ok=True)
+        path = QtWidgets.QFileDialog.getExistingDirectory(self, "选择导出目录", str(base))
+        if path:
+            self.export_out.setText(path)
+
     def _run_export(self) -> None:
         db_path = Path(self.db_edit.text()).resolve()
         if not db_path.is_file():
             QtWidgets.QMessageBox.warning(self, "提示", "数据库不存在，请先导入聊天记录。")
             return
 
-        default_out = default_export_slice_dir().resolve()
-        default_out.mkdir(parents=True, exist_ok=True)
-        out_dir_text = QtWidgets.QFileDialog.getExistingDirectory(
-            self,
-            "选择导出目录",
-            str(default_out),
-        )
+        out_dir_text = self.export_out.text().strip()
         if not out_dir_text:
+            QtWidgets.QMessageBox.warning(self, "提示", "请先选择输出目录。")
             return
         out_dir = Path(out_dir_text).resolve()
+        out_dir.mkdir(parents=True, exist_ok=True)
+        from_bound = self.export_from.text().strip()
+        to_bound = self.export_to.text().strip()
 
         def worker() -> None:
             try:
@@ -281,8 +353,8 @@ class TeleArchiveWindow(QtWidgets.QMainWindow):
                         db,
                         out_dir,
                         chat_id,
-                        from_bound=self.board_from.text().strip(),
-                        to_bound=self.board_to.text().strip(),
+                        from_bound=from_bound,
+                        to_bound=to_bound,
                         include_media=True,
                     )
             except Exception as exc:  # noqa: BLE001
@@ -329,6 +401,11 @@ class TeleArchiveWindow(QtWidgets.QMainWindow):
 
     # --- Board --------------------------------------------------------------
 
+    def _set_export_shortcut(self, name: str) -> None:
+        start, end = set_shortcut_range(name)
+        self.export_from.setText(start)
+        self.export_to.setText(end)
+
     def _set_board_shortcut(self, name: str) -> None:
         start, end = set_shortcut_range(name)
         self.board_from.setText(start)
@@ -348,7 +425,7 @@ class TeleArchiveWindow(QtWidgets.QMainWindow):
                     if not chats:
                         raise ValueError("数据库中没有聊天记录，请先导入。")
                     if len(chats) > 1:
-                        raise ValueError("数据库中有多个群聊，请使用 Tk 版填写群聊 ID。")
+                        raise ValueError("数据库中有多个群聊，请先在数据库中只保留目标群聊数据。")
                     chat_id = chats[0].chat_id
                     result = render_range_to_cache(
                         db,
@@ -388,6 +465,105 @@ class TeleArchiveWindow(QtWidgets.QMainWindow):
         )
         self.web.load(QtCore.QUrl.fromLocalFile(str(path)))
         self._log(f"看板已加载: {path}")
+
+    # --- Update -------------------------------------------------------------
+
+    def _check_update_on_startup(self) -> None:
+        def worker() -> None:
+            result = check_for_update()
+            self.update_result_ready.emit(result, True)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _check_update_manual(self) -> None:
+        self._log("正在检查更新…")
+
+        def worker() -> None:
+            result = check_for_update()
+            self.update_result_ready.emit(result, False)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    @QtCore.Slot(object, bool)
+    def _on_update_result_ready(self, result: object, quiet: bool) -> None:
+        if not isinstance(result, UpdateCheckResult):
+            return
+        if quiet and not should_notify_update(result):
+            return
+        if result.error:
+            if not quiet:
+                QtWidgets.QMessageBox.warning(self, "检查更新", result.error)
+            self._log(f"检查更新失败: {result.error}")
+            return
+        if not result.has_update:
+            if not quiet:
+                QtWidgets.QMessageBox.information(
+                    self,
+                    "检查更新",
+                    f"当前已是最新版本（v{result.current_version}）。",
+                )
+            self._log(f"当前已是最新版本: v{result.current_version}")
+            return
+        if result.latest:
+            self._present_update(result.latest, result.current_version, quiet=quiet)
+
+    def _present_update(self, release: ReleaseInfo, current_version: str, *, quiet: bool) -> None:
+        if quiet:
+            self._log(f"发现新版本 v{release.version}。")
+        box = QtWidgets.QMessageBox(self)
+        box.setIcon(QtWidgets.QMessageBox.Information)
+        box.setWindowTitle("发现新版本")
+        box.setText(f"当前版本: v{current_version}\n最新版本: v{release.version}")
+        box.setInformativeText("可选择立即更新，或前往 Release 页面下载。")
+        notes = release.notes.strip() or "（无更新说明）"
+        box.setDetailedText(notes[:4000])
+        btn_update = box.addButton("立即更新", QtWidgets.QMessageBox.AcceptRole)
+        btn_open = box.addButton("前往下载", QtWidgets.QMessageBox.ActionRole)
+        box.addButton("稍后", QtWidgets.QMessageBox.RejectRole)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked == btn_update:
+            self._update_now(release)
+            return
+        if clicked == btn_open:
+            webbrowser.open(release.download_url or release.url)
+
+    def _update_now(self, release: ReleaseInfo) -> None:
+        self._log("正在下载并更新…")
+
+        def worker() -> None:
+            try:
+                perform_in_app_update(release)
+            except RuntimeError as exc:
+                QtCore.QMetaObject.invokeMethod(
+                    self,
+                    "_show_error",
+                    QtCore.Qt.QueuedConnection,
+                    QtCore.Q_ARG(str, str(exc)),
+                )
+                return
+            except Exception as exc:  # noqa: BLE001
+                QtCore.QMetaObject.invokeMethod(
+                    self,
+                    "_show_error",
+                    QtCore.Qt.QueuedConnection,
+                    QtCore.Q_ARG(str, f"立即更新失败: {exc}"),
+                )
+                return
+
+            QtCore.QMetaObject.invokeMethod(
+                self,
+                "_append_log",
+                QtCore.Qt.QueuedConnection,
+                QtCore.Q_ARG(str, "更新包已验证，应用即将重启…"),
+            )
+            QtCore.QMetaObject.invokeMethod(
+                QtWidgets.QApplication.instance(),
+                "quit",
+                QtCore.Qt.QueuedConnection,
+            )
+
+        threading.Thread(target=worker, daemon=True).start()
 
 
 def launch_qt_gui() -> None:
