@@ -439,8 +439,8 @@ def perform_in_app_update(release: ReleaseInfo) -> None:
             f"\n期望: {release.sha256}\n实际: {actual_hash}"
         )
 
-    updater_bat = staging_dir / "apply_update.bat"
-    updater_bat.write_text(
+    updater_ps1 = staging_dir / "apply_update.ps1"
+    updater_ps1.write_text(
         _build_windows_updater_script(
             current_exe=current_exe,
             new_exe=new_exe,
@@ -449,15 +449,28 @@ def perform_in_app_update(release: ReleaseInfo) -> None:
         encoding="utf-8",
     )
 
-    # Detached updater process: wait current app exit, replace exe, relaunch.
+    # Hidden detached updater: wait for app exit, replace exe, relaunch.
     CREATE_NO_WINDOW = 0x08000000
     DETACHED_PROCESS = 0x00000008
     subprocess.Popen(
-        ["cmd", "/c", str(updater_bat)],
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-WindowStyle",
+            "Hidden",
+            "-File",
+            str(updater_ps1),
+        ],
         creationflags=CREATE_NO_WINDOW | DETACHED_PROCESS,
         close_fds=True,
         cwd=str(staging_dir),
     )
+
+
+def _ps_single_quoted(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
 
 
 def _build_windows_updater_script(
@@ -466,82 +479,75 @@ def _build_windows_updater_script(
     new_exe: Path,
     parent_pid: int,
 ) -> str:
-    exe = str(current_exe)
-    bak = str(current_exe.with_suffix(current_exe.suffix + ".old"))
-    newf = str(new_exe)
-    exedir = str(current_exe.parent)
-    log = str(Path(tempfile.gettempdir()) / "telearchive-update" / "update.log")
-    pyi_root = r"%LOCALAPPDATA%\TeleArchive\_pyi"
-    return f"""@echo off
-setlocal enabledelayedexpansion
-set "TARGET={exe}"
-set "BACKUP={bak}"
-set "NEWFILE={newf}"
-set "EXEDIR={exedir}"
-set "LOGFILE={log}"
-set "PARENT_PID={parent_pid}"
-set "PYIROOT={pyi_root}"
-set /a ATTEMPT=0
+    exe = _ps_single_quoted(str(current_exe))
+    bak = _ps_single_quoted(str(current_exe.with_suffix(current_exe.suffix + ".old")))
+    newf = _ps_single_quoted(str(new_exe))
+    exedir = _ps_single_quoted(str(current_exe.parent))
+    log = _ps_single_quoted(str(Path(tempfile.gettempdir()) / "telearchive-update" / "update.log"))
+    pyi_root = _ps_single_quoted(str(Path(os.environ.get("LOCALAPPDATA", "")) / "TeleArchive" / "_pyi"))
+    script_path = _ps_single_quoted(
+        str(Path(tempfile.gettempdir()) / "telearchive-update" / "apply_update.ps1")
+    )
+    return f"""$ErrorActionPreference = 'SilentlyContinue'
+$Target = {exe}
+$Backup = {bak}
+$NewFile = {newf}
+$ExeDir = {exedir}
+$LogFile = {log}
+$PyiRoot = {pyi_root}
+$SelfScript = {script_path}
+$ParentPid = {parent_pid}
 
-echo [%date% %time%] updater started pid=!PARENT_PID! >> "%LOGFILE%"
+function Write-UpdateLog([string]$Message) {{
+    Add-Content -Path $LogFile -Value "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] $Message"
+}}
 
-:wait_pid
-timeout /t 1 /nobreak >nul
-tasklist /FI "PID eq %PARENT_PID%" 2>nul | find /I "%PARENT_PID%" >nul
-if not errorlevel 1 (
-  set /a ATTEMPT+=1
-  if !ATTEMPT! lss 120 goto wait_pid
-  echo [%date% %time%] parent pid still running >> "%LOGFILE%"
-)
+function Clear-PyiExtracts([string]$Root) {{
+    if (-not (Test-Path -LiteralPath $Root)) {{ return }}
+    Get-ChildItem -LiteralPath $Root -Directory -Filter '_MEI*' | ForEach-Object {{
+        Remove-Item -LiteralPath $_.FullName -Recurse -Force
+    }}
+}}
 
-REM Let QtWebEngine child processes release DLL locks.
-timeout /t 3 /nobreak >nul
+Write-UpdateLog "updater started pid=$ParentPid"
 
-call :clean_pyi "%EXEDIR%"
-if exist "%PYIROOT%" call :clean_pyi "%PYIROOT%"
+try {{
+    Wait-Process -Id $ParentPid -Timeout 120 -ErrorAction Stop
+    Write-UpdateLog "parent process exited"
+}} catch {{
+    Write-UpdateLog "wait-process finished: $($_.Exception.Message)"
+}}
 
-set /a ATTEMPT=0
-:wait_and_replace
-timeout /t 1 /nobreak >nul
-set /a ATTEMPT+=1
+Start-Sleep -Seconds 3
+Clear-PyiExtracts $ExeDir
+Clear-PyiExtracts $PyiRoot
 
-if exist "%BACKUP%" del /f /q "%BACKUP%" >nul 2>nul
-if exist "%TARGET%" move /Y "%TARGET%" "%BACKUP%" >nul 2>nul
-if exist "%TARGET%" (
-  if !ATTEMPT! lss 120 goto wait_and_replace
-  echo [%date% %time%] replace timeout, restoring backup >> "%LOGFILE%"
-  goto fallback_launch_old
-)
+$attempt = 0
+while ($attempt -lt 120) {{
+    Start-Sleep -Seconds 1
+    $attempt++
+    if (Test-Path -LiteralPath $Backup) {{ Remove-Item -LiteralPath $Backup -Force }}
+    if (Test-Path -LiteralPath $Target) {{
+        Move-Item -LiteralPath $Target -Destination $Backup -Force
+    }}
+    if (-not (Test-Path -LiteralPath $Target)) {{ break }}
+}}
 
-move /Y "%NEWFILE%" "%TARGET%" >nul 2>nul
-if exist "%TARGET%" (
-  call :clean_pyi "%EXEDIR%"
-  if exist "%PYIROOT%" call :clean_pyi "%PYIROOT%"
-  cd /d "%EXEDIR%"
-  powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -LiteralPath '%TARGET%' -WorkingDirectory '%EXEDIR%'" >nul 2>nul
-  if errorlevel 1 (
-    start "" "%TARGET%"
-  )
-  echo [%date% %time%] relaunched %TARGET% >> "%LOGFILE%"
-  if exist "%BACKUP%" del /f /q "%BACKUP%" >nul 2>nul
-  del /f /q "%~f0" >nul 2>nul
-  exit /b 0
-)
+if (Test-Path -LiteralPath $Target) {{
+    Write-UpdateLog "replace timeout, restoring backup"
+    if (Test-Path -LiteralPath $Backup) {{
+        Start-Process -LiteralPath $Backup -WorkingDirectory $ExeDir
+    }}
+    Remove-Item -LiteralPath $SelfScript -Force
+    exit 1
+}}
 
-:fallback_launch_old
-if exist "%BACKUP%" (
-  cd /d "%EXEDIR%"
-  powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -LiteralPath '%BACKUP%' -WorkingDirectory '%EXEDIR%'" >nul 2>nul
-  if errorlevel 1 start "" "%BACKUP%"
-)
-del /f /q "%~f0" >nul 2>nul
-exit /b 1
-
-:clean_pyi
-set "ROOT=%~1"
-if not exist "%ROOT%" exit /b 0
-for /d %%D in ("%ROOT%\\_MEI*") do (
-  rmdir /s /q "%%D" >nul 2>nul
-)
-exit /b 0
+Move-Item -LiteralPath $NewFile -Destination $Target -Force
+Clear-PyiExtracts $ExeDir
+Clear-PyiExtracts $PyiRoot
+Start-Process -LiteralPath $Target -WorkingDirectory $ExeDir
+Write-UpdateLog "relaunched $Target"
+if (Test-Path -LiteralPath $Backup) {{ Remove-Item -LiteralPath $Backup -Force }}
+Remove-Item -LiteralPath $SelfScript -Force
+exit 0
 """
