@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import sys
 import threading
+import time
 import webbrowser
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtWebEngineWidgets import QWebEngineView
@@ -16,11 +16,7 @@ from telearchive import __version__
 from telearchive.db import Database
 from telearchive.export_chat import export_chat_range
 from telearchive.export_dates import default_datetime_bounds, set_shortcut_range
-from telearchive.html_board import (
-    BoardRenderResult,
-    render_range_to_cache,
-    warmup_all_messages_cache,
-)
+from telearchive.html_board import clear_board_cache, render_range_to_cache
 from telearchive.merge import ingest_paths
 from telearchive.paths import (
     default_db_path,
@@ -47,6 +43,7 @@ class TeleArchiveWindow(QtWidgets.QMainWindow):
         self.db_path = default_db_path().resolve()
         self.export_paths: list[Path] = []
         self.html_cache_dir = default_html_cache_dir().resolve()
+        self._board_loaded = False
         self.update_result_ready.connect(self._on_update_result_ready)
 
         self._build_ui()
@@ -300,6 +297,11 @@ class TeleArchiveWindow(QtWidgets.QMainWindow):
                 QtCore.Qt.QueuedConnection,
                 QtCore.Q_ARG(str, "\n".join(lines)),
             )
+            QtCore.QMetaObject.invokeMethod(
+                self,
+                "_refresh_board_after_ingest",
+                QtCore.Qt.QueuedConnection,
+            )
 
         import threading as _t
 
@@ -412,11 +414,21 @@ class TeleArchiveWindow(QtWidgets.QMainWindow):
         self.board_to.setText(end)
         self._render_board()
 
+    @QtCore.Slot()
+    def _refresh_board_after_ingest(self) -> None:
+        if not self._board_loaded:
+            return
+        self._log("导入完成，正在从数据库重新渲染看板…")
+        self._render_board()
+
     def _render_board(self) -> None:
         db_path = Path(self.db_edit.text()).resolve()
         if not db_path.is_file():
             QtWidgets.QMessageBox.warning(self, "提示", "数据库不存在，请先导入聊天记录。")
             return
+
+        from_bound = self.board_from.text().strip()
+        to_bound = self.board_to.text().strip()
 
         def worker() -> None:
             try:
@@ -427,12 +439,14 @@ class TeleArchiveWindow(QtWidgets.QMainWindow):
                     if len(chats) > 1:
                         raise ValueError("数据库中有多个群聊，请先在数据库中只保留目标群聊数据。")
                     chat_id = chats[0].chat_id
+                    clear_board_cache(self.html_cache_dir, chat_id=chat_id)
                     result = render_range_to_cache(
                         db,
                         self.html_cache_dir,
                         chat_id,
-                        self.board_from.text().strip(),
-                        self.board_to.text().strip(),
+                        from_bound,
+                        to_bound,
+                        force_refresh=True,
                     )
             except Exception as exc:  # noqa: BLE001
                 QtCore.QMetaObject.invokeMethod(
@@ -460,11 +474,20 @@ class TeleArchiveWindow(QtWidgets.QMainWindow):
     @QtCore.Slot(str, str, int)
     def _load_board(self, html_path: str, chat_name: str, count: int) -> None:
         path = Path(html_path).resolve()
+        self._board_loaded = True
         self.board_status.setText(
             f"{chat_name} | {count} 条 | {self.board_from.text()} ~ {self.board_to.text()}"
         )
-        self.web.load(QtCore.QUrl.fromLocalFile(str(path)))
+        url = QtCore.QUrl.fromLocalFile(str(path))
+        url.setQuery(f"t={int(time.time() * 1000)}")
+        self.web.load(url)
         self._log(f"看板已加载: {path}")
+
+    def closeEvent(self, event: QtGui.QCloseEvent) -> None:
+        clear_board_cache(self.html_cache_dir)
+        self._board_loaded = False
+        self.web.setUrl(QtCore.QUrl("about:blank"))
+        super().closeEvent(event)
 
     # --- Update -------------------------------------------------------------
 

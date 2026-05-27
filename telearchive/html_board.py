@@ -50,12 +50,28 @@ class BoardRenderResult:
     cached: bool
 
 
+def clear_board_cache(cache_dir: Path, *, chat_id: int | None = None) -> None:
+    """Remove cached HTML bundles so the next render reads fresh data from the DB."""
+    root = cache_dir.resolve()
+    if not root.is_dir():
+        return
+    if chat_id is None:
+        shutil.rmtree(root, ignore_errors=True)
+        root.mkdir(parents=True, exist_ok=True)
+        return
+    chat_dir = root / f"chat_{chat_id}"
+    if chat_dir.is_dir():
+        shutil.rmtree(chat_dir, ignore_errors=True)
+
+
 def render_range_to_cache(
     db: Database,
     cache_dir: Path,
     chat_id: int,
     from_text: str,
     to_text: str,
+    *,
+    force_refresh: bool = False,
 ) -> BoardRenderResult:
     from_ts = parse_bound(from_text, end_of_day=False)
     to_ts = parse_bound(to_text, end_of_day=True)
@@ -72,7 +88,9 @@ def render_range_to_cache(
     bundle_dir = chat_dir / key
     json_path = bundle_dir / "board_meta.json"
     html_path = bundle_dir / "messages.html"
-    if html_path.is_file() and json_path.is_file():
+    if force_refresh and bundle_dir.exists():
+        shutil.rmtree(bundle_dir, ignore_errors=True)
+    if html_path.is_file() and json_path.is_file() and not force_refresh:
         count = _load_count(json_path)
         return BoardRenderResult(
             chat_id=chat_id,
