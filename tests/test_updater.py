@@ -109,7 +109,8 @@ def test_updater_script_waits_for_pid_and_cleans_pyi(tmp_path: Path) -> None:
     assert "$ParentPid = 4242" in script
     assert "Wait-Process -Id $ParentPid" in script
     assert "Clear-PyiExtracts" in script
-    assert "TeleArchive\\_pyi" in script
+    assert "$PyiRoot" in script
+    assert "_pyi" in script
 
 
 def _fake_release(version: str):
