@@ -17,7 +17,7 @@ from telearchive.db import Database
 from telearchive.export_chat import export_chat_range
 from telearchive.export_dates import default_datetime_bounds, set_shortcut_range
 from telearchive.html_board import clear_board_cache, render_range_to_cache
-from telearchive.merge import ingest_paths
+from telearchive.merge import ingest_paths, inspect_export_chats
 from telearchive.paths import (
     default_db_path,
     default_export_slice_dir,
@@ -327,6 +327,74 @@ class TeleArchiveWindow(QtWidgets.QMainWindow):
         db_path = Path(self.db_edit.text()).resolve()
         if not db_path.parent.exists():
             db_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            export_chats = inspect_export_chats(self.export_paths)
+        except Exception as exc:  # noqa: BLE001
+            QtWidgets.QMessageBox.critical(self, "错误", f"导入前检查失败: {exc}")
+            return
+        if not export_chats:
+            QtWidgets.QMessageBox.information(self, "提示", "未找到可导入的 result.json。")
+            return
+
+        incoming_ids = {item.chat_id for item in export_chats}
+        if len(incoming_ids) > 1:
+            detail = "\n".join(
+                f"- {item.chat_name} ({item.chat_id}) | {Path(item.source_path).parent.name}"
+                for item in export_chats
+            )
+            QtWidgets.QMessageBox.critical(
+                self,
+                "导入已拦截",
+                "本次选择中包含多个群聊，已阻止导入。\n请一次只导入同一个群聊。",
+                QtWidgets.QMessageBox.Ok,
+                QtWidgets.QMessageBox.Ok,
+            )
+            self._log("导入前检查失败：检测到多群混入。")
+            self._log(detail)
+            return
+
+        with Database(db_path) as db:
+            chats = db.list_chat_stats()
+        if len(chats) > 1:
+            QtWidgets.QMessageBox.critical(
+                self,
+                "导入已拦截",
+                "当前数据库已经包含多个群聊，请先拆分数据库后再导入。",
+            )
+            self._log("导入前检查失败：数据库内已有多个群聊。")
+            return
+        incoming = export_chats[0]
+        if chats and chats[0].chat_id != incoming.chat_id:
+            QtWidgets.QMessageBox.critical(
+                self,
+                "导入已拦截",
+                (
+                    "检测到群聊不一致，已阻止导入。\n"
+                    f"当前数据库: {chats[0].name} ({chats[0].chat_id})\n"
+                    f"本次导入: {incoming.chat_name} ({incoming.chat_id})"
+                ),
+            )
+            self._log("导入前检查失败：导入群聊与数据库现有群聊不一致。")
+            return
+
+        target_text = (
+            f"{incoming.chat_name} ({incoming.chat_id})，"
+            f"共 {sum(item.message_count for item in export_chats)} 条消息"
+        )
+        if chats:
+            prompt = (
+                f"确认继续导入？\n\n"
+                f"当前数据库群聊: {chats[0].name} ({chats[0].chat_id})\n"
+                f"本次导入群聊: {target_text}"
+            )
+        else:
+            prompt = f"确认导入群聊 {target_text} 到新数据库吗？"
+        if (
+            QtWidgets.QMessageBox.question(self, "确认导入", prompt)
+            != QtWidgets.QMessageBox.Yes
+        ):
+            self._log("用户取消导入。")
+            return
 
         def worker() -> None:
             try:

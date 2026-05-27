@@ -3,21 +3,49 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from pathlib import Path
 
 from telearchive.db import Database, IngestStats
-from telearchive.parser import iter_export_files, parse_export_file
+from telearchive.parser import ParsedChat, iter_export_files, parse_export_file
 
 
-def ingest_paths(db: Database, paths: list[Path]) -> list[tuple[str, IngestStats]]:
+@dataclass(frozen=True)
+class ExportChatSummary:
+    source_path: str
+    chat_id: int
+    chat_name: str
+    message_count: int
+
+
+def inspect_export_chats(paths: list[Path]) -> list[ExportChatSummary]:
+    parsed_batches = _parse_exports(paths)
+    summaries: list[ExportChatSummary] = []
+    for export_file, chats in parsed_batches:
+        for chat in chats:
+            summaries.append(
+                ExportChatSummary(
+                    source_path=str(export_file),
+                    chat_id=chat.chat_id,
+                    chat_name=chat.name,
+                    message_count=len(chat.messages),
+                )
+            )
+    return summaries
+
+
+def ingest_paths(
+    db: Database, paths: list[Path], *, allow_mixed_chats: bool = False
+) -> list[tuple[str, IngestStats]]:
     """Import all result.json files found under the given paths."""
-    export_files = _collect_export_files(paths)
+    parsed_batches = _parse_exports(paths)
+    _validate_chat_scope(db, parsed_batches, allow_mixed_chats=allow_mixed_chats)
+
     results: list[tuple[str, IngestStats]] = []
 
-    for export_file in export_files:
-        resolved = export_file.resolve()
+    for resolved, chats in parsed_batches:
         total = IngestStats()
-        for chat in parse_export_file(resolved):
+        for chat in chats:
             db.upsert_chat(chat)
             part = db.upsert_messages(
                 chat.chat_id,
@@ -36,6 +64,44 @@ def ingest_paths(db: Database, paths: list[Path]) -> list[tuple[str, IngestStats
         results.append((str(resolved), total))
 
     return results
+
+
+def _validate_chat_scope(
+    db: Database,
+    parsed_batches: list[tuple[Path, list[ParsedChat]]],
+    *,
+    allow_mixed_chats: bool,
+) -> None:
+    if allow_mixed_chats:
+        return
+
+    db_chats = db.list_chat_stats()
+    db_chat_ids = {chat.chat_id for chat in db_chats}
+    incoming_chat_ids = {chat.chat_id for _, chats in parsed_batches for chat in chats}
+
+    if len(db_chat_ids) > 1:
+        raise ValueError("数据库中已有多个群聊，请先拆分数据库后再导入。")
+    if len(incoming_chat_ids) > 1:
+        raise ValueError("本次导入包含多个群聊，请一次仅导入同一个群聊。")
+    if db_chat_ids and incoming_chat_ids and db_chat_ids != incoming_chat_ids:
+        existing = db_chats[0]
+        incoming_chat = next(
+            chat for _, chats in parsed_batches for chat in chats if chat.chat_id in incoming_chat_ids
+        )
+        raise ValueError(
+            "检测到导入群聊与数据库现有群聊不一致："
+            f"当前库为 {existing.name}({existing.chat_id})，"
+            f"本次导入为 {incoming_chat.name}({incoming_chat.chat_id})。"
+        )
+
+
+def _parse_exports(paths: list[Path]) -> list[tuple[Path, list[ParsedChat]]]:
+    export_files = _collect_export_files(paths)
+    batches: list[tuple[Path, list[ParsedChat]]] = []
+    for export_file in export_files:
+        resolved = export_file.resolve()
+        batches.append((resolved, parse_export_file(resolved)))
+    return batches
 
 
 def _collect_export_files(paths: list[Path]) -> list[Path]:

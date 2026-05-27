@@ -170,12 +170,19 @@ def ingest(
     db: Optional[Path] = typer.Option(
         None, "--db", help="数据库路径，默认 data/telearchive.db"
     ),
+    allow_mixed_chats: bool = typer.Option(
+        False,
+        "--allow-mixed-chats",
+        help="允许导入与当前数据库不同的群聊（不推荐）",
+    ),
 ) -> None:
     """导入并合并聊天记录（按 chat_id + message_id 去重，保留旧导出中已删消息）。"""
     db_path = _resolve_db(db)
     with Database(db_path) as database:
         try:
-            results = ingest_paths(database, paths)
+            results = ingest_paths(
+                database, paths, allow_mixed_chats=allow_mixed_chats
+            )
         except FileNotFoundError as e:
             console.print(f"[red]错误[/red]: {e}")
             raise typer.Exit(1) from e
