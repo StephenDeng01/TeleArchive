@@ -247,6 +247,86 @@ class TeleArchiveWindow(QtWidgets.QMainWindow):
     def _show_error(self, text: str) -> None:
         QtWidgets.QMessageBox.critical(self, "错误", text)
 
+    @QtCore.Slot(str)
+    def _show_info(self, text: str) -> None:
+        QtWidgets.QMessageBox.information(self, "导出完成", text)
+
+    def _run_export(self) -> None:
+        db_path = Path(self.db_edit.text()).resolve()
+        if not db_path.is_file():
+            QtWidgets.QMessageBox.warning(self, "提示", "数据库不存在，请先导入聊天记录。")
+            return
+
+        default_out = default_export_slice_dir().resolve()
+        default_out.mkdir(parents=True, exist_ok=True)
+        out_dir_text = QtWidgets.QFileDialog.getExistingDirectory(
+            self,
+            "选择导出目录",
+            str(default_out),
+        )
+        if not out_dir_text:
+            return
+        out_dir = Path(out_dir_text).resolve()
+
+        def worker() -> None:
+            try:
+                with Database(db_path) as db:
+                    chats = db.list_chat_stats()
+                    if not chats:
+                        raise ValueError("数据库中没有聊天记录，请先导入。")
+                    if len(chats) > 1:
+                        raise ValueError("数据库中有多个群聊，请先在数据库中只保留目标群聊数据。")
+                    chat_id = chats[0].chat_id
+                    result = export_chat_range(
+                        db,
+                        out_dir,
+                        chat_id,
+                        from_bound=self.board_from.text().strip(),
+                        to_bound=self.board_to.text().strip(),
+                        include_media=True,
+                    )
+            except Exception as exc:  # noqa: BLE001
+                QtCore.QMetaObject.invokeMethod(
+                    self,
+                    "_show_error",
+                    QtCore.Qt.QueuedConnection,
+                    QtCore.Q_ARG(str, f"导出失败: {exc}"),
+                )
+                return
+
+            msg = (
+                f"已导出 {result.message_count} 条消息\n"
+                f"目录: {result.output_dir}\n"
+                f"媒体: 复制 {result.media_copied}，缺失 {result.media_missing}"
+            )
+            QtCore.QMetaObject.invokeMethod(
+                self,
+                "_append_log",
+                QtCore.Qt.QueuedConnection,
+                QtCore.Q_ARG(
+                    str,
+                    "\n".join(
+                        [
+                            "=== 导出完成 ===",
+                            f"群聊: {result.chat_name}",
+                            f"目录: {result.output_dir}",
+                            f"消息: {result.message_count} 条",
+                            f"媒体: 复制 {result.media_copied}，缺失 {result.media_missing}",
+                        ]
+                    ),
+                ),
+            )
+            QtCore.QMetaObject.invokeMethod(
+                self,
+                "_show_info",
+                QtCore.Qt.QueuedConnection,
+                QtCore.Q_ARG(str, msg),
+            )
+
+        import threading as _t
+
+        _t.Thread(target=worker, daemon=True).start()
+
     # --- Board --------------------------------------------------------------
 
     def _set_board_shortcut(self, name: str) -> None:
