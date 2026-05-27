@@ -444,6 +444,7 @@ def perform_in_app_update(release: ReleaseInfo) -> None:
         _build_windows_updater_script(
             current_exe=current_exe,
             new_exe=new_exe,
+            parent_pid=os.getpid(),
         ),
         encoding="utf-8",
     )
@@ -459,12 +460,18 @@ def perform_in_app_update(release: ReleaseInfo) -> None:
     )
 
 
-def _build_windows_updater_script(*, current_exe: Path, new_exe: Path) -> str:
+def _build_windows_updater_script(
+    *,
+    current_exe: Path,
+    new_exe: Path,
+    parent_pid: int,
+) -> str:
     exe = str(current_exe)
     bak = str(current_exe.with_suffix(current_exe.suffix + ".old"))
     newf = str(new_exe)
     exedir = str(current_exe.parent)
     log = str(Path(tempfile.gettempdir()) / "telearchive-update" / "update.log")
+    pyi_root = r"%LOCALAPPDATA%\TeleArchive\_pyi"
     return f"""@echo off
 setlocal enabledelayedexpansion
 set "TARGET={exe}"
@@ -472,10 +479,28 @@ set "BACKUP={bak}"
 set "NEWFILE={newf}"
 set "EXEDIR={exedir}"
 set "LOGFILE={log}"
+set "PARENT_PID={parent_pid}"
+set "PYIROOT={pyi_root}"
 set /a ATTEMPT=0
 
-echo [%date% %time%] updater started >> "%LOGFILE%"
+echo [%date% %time%] updater started pid=!PARENT_PID! >> "%LOGFILE%"
 
+:wait_pid
+timeout /t 1 /nobreak >nul
+tasklist /FI "PID eq %PARENT_PID%" 2>nul | find /I "%PARENT_PID%" >nul
+if not errorlevel 1 (
+  set /a ATTEMPT+=1
+  if !ATTEMPT! lss 120 goto wait_pid
+  echo [%date% %time%] parent pid still running >> "%LOGFILE%"
+)
+
+REM Let QtWebEngine child processes release DLL locks.
+timeout /t 3 /nobreak >nul
+
+call :clean_pyi "%EXEDIR%"
+if exist "%PYIROOT%" call :clean_pyi "%PYIROOT%"
+
+set /a ATTEMPT=0
 :wait_and_replace
 timeout /t 1 /nobreak >nul
 set /a ATTEMPT+=1
@@ -490,6 +515,8 @@ if exist "%TARGET%" (
 
 move /Y "%NEWFILE%" "%TARGET%" >nul 2>nul
 if exist "%TARGET%" (
+  call :clean_pyi "%EXEDIR%"
+  if exist "%PYIROOT%" call :clean_pyi "%PYIROOT%"
   cd /d "%EXEDIR%"
   powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -LiteralPath '%TARGET%' -WorkingDirectory '%EXEDIR%'" >nul 2>nul
   if errorlevel 1 (
@@ -509,4 +536,12 @@ if exist "%BACKUP%" (
 )
 del /f /q "%~f0" >nul 2>nul
 exit /b 1
+
+:clean_pyi
+set "ROOT=%~1"
+if not exist "%ROOT%" exit /b 0
+for /d %%D in ("%ROOT%\\_MEI*") do (
+  rmdir /s /q "%%D" >nul 2>nul
+)
+exit /b 0
 """

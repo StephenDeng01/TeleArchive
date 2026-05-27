@@ -36,6 +36,7 @@ hiddenimports = (
     "telearchive.paths",
     "telearchive.updater",
     "telearchive.update_dialog",
+    "telearchive.frozen_runtime",
     "telearchive.notify",
     "telearchive.export_dates",
     "telearchive.export_chat",
@@ -83,9 +84,9 @@ exe = EXE(
     strip=False,
     upx=True,
     upx_exclude=[],
-    # Extract onefile runtime payload next to the exe, instead of system temp.
-    # This avoids "Failed to load Python DLL" on some Windows setups where TEMP is restricted.
-    runtime_tmpdir=".",
+    # Extract runtime payload under %LOCALAPPDATA% so exe self-update does not
+    # fight with _MEI folders next to TeleArchive.exe.
+    runtime_tmpdir=r"%LOCALAPPDATA%\TeleArchive\_pyi",
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,

@@ -98,6 +98,20 @@ def test_should_notify_when_not_dismissed(tmp_path: Path, monkeypatch) -> None:
     assert should_notify_update(result)
 
 
+def test_updater_script_waits_for_pid_and_cleans_pyi(tmp_path: Path) -> None:
+    from telearchive.updater import _build_windows_updater_script
+
+    script = _build_windows_updater_script(
+        current_exe=tmp_path / "TeleArchive.exe",
+        new_exe=tmp_path / "TeleArchive-0.8.6.exe",
+        parent_pid=4242,
+    )
+    assert "PARENT_PID=4242" in script
+    assert ":wait_pid" in script
+    assert ":clean_pyi" in script
+    assert r"%LOCALAPPDATA%\TeleArchive\_pyi" in script
+
+
 def _fake_release(version: str):
     from telearchive.updater import ReleaseInfo
 

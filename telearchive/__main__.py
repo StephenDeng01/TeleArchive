@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sys
 
-from telearchive.gui_qt import launch_qt_gui
+from telearchive.frozen_runtime import cleanup_stale_pyi_extracts
 
 
 def should_launch_gui(argv: list[str] | None = None) -> bool:
@@ -18,11 +18,14 @@ def should_launch_gui(argv: list[str] | None = None) -> bool:
 
 
 def main() -> None:
+    cleanup_stale_pyi_extracts()
     argv = sys.argv[1:]
     if argv[:1] == ["--cli"]:
         argv = argv[1:]
 
     if should_launch_gui(argv):
+        from telearchive.gui_qt import launch_qt_gui
+
         launch_qt_gui()
         return
 

@@ -582,12 +582,19 @@ class TeleArchiveWindow(QtWidgets.QMainWindow):
                 QtCore.Q_ARG(str, "更新包已验证，应用即将重启…"),
             )
             QtCore.QMetaObject.invokeMethod(
-                QtWidgets.QApplication.instance(),
-                "quit",
+                self,
+                "_shutdown_for_update",
                 QtCore.Qt.QueuedConnection,
             )
 
         threading.Thread(target=worker, daemon=True).start()
+
+    @QtCore.Slot()
+    def _shutdown_for_update(self) -> None:
+        self._log("正在关闭界面以完成更新…")
+        self.web.setUrl(QtCore.QUrl("about:blank"))
+        QtWidgets.QApplication.processEvents()
+        QtCore.QTimer.singleShot(500, QtWidgets.QApplication.instance().quit)
 
 
 def launch_qt_gui() -> None:
