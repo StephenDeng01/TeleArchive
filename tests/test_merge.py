@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from telearchive.db import Database
+from telearchive.db_tools import split_db_by_chat
 from telearchive.merge import ingest_paths
 from telearchive.parser import iter_export_files
 
@@ -108,3 +109,23 @@ def test_allow_mixed_chat_ingest_when_opt_in(tmp_path: Path) -> None:
         chats = db.list_chat_stats()
 
     assert {chat.chat_id for chat in chats} == {1001, 2002}
+
+
+def test_split_db_by_chat(tmp_path: Path) -> None:
+    export_a = tmp_path / "a" / "result.json"
+    export_b = tmp_path / "b" / "result.json"
+    _write_chat_export(export_a, chat_id=1001, name="群A", msg_id=1)
+    _write_chat_export(export_b, chat_id=2002, name="群B", msg_id=1)
+
+    mixed_db = tmp_path / "mixed.db"
+    with Database(mixed_db) as db:
+        ingest_paths(db, [export_a.parent, export_b.parent], allow_mixed_chats=True)
+
+    out_dir = tmp_path / "out"
+    results = split_db_by_chat(mixed_db, out_dir)
+    assert {r.chat_id for r in results} == {1001, 2002}
+    for r in results:
+        with Database(r.output_db) as db:
+            chats = db.list_chat_stats()
+            assert len(chats) == 1
+            assert chats[0].chat_id == r.chat_id

@@ -18,6 +18,7 @@ from telearchive.export_chat import export_chat_range
 from telearchive.export_dates import default_datetime_bounds, set_shortcut_range
 from telearchive.html_board import clear_board_cache, render_range_to_cache
 from telearchive.merge import ingest_paths, inspect_export_chats
+from telearchive.db_tools import create_db_backup, rollback_db_from_backup, split_db_by_chat
 from telearchive.paths import (
     default_db_path,
     default_export_slice_dir,
@@ -166,9 +167,15 @@ class TeleArchiveWindow(QtWidgets.QMainWindow):
         self.btn_ingest.clicked.connect(self._run_ingest)
         self.btn_update = QtWidgets.QPushButton("检查更新")
         self.btn_update.clicked.connect(self._check_update_manual)
+        self.btn_split = QtWidgets.QPushButton("拆分数据库")
+        self.btn_split.clicked.connect(self._split_db)
+        self.btn_rollback = QtWidgets.QPushButton("回滚导入")
+        self.btn_rollback.clicked.connect(self._rollback_db)
         action_row.addWidget(self.btn_init)
         action_row.addWidget(self.btn_ingest)
         action_row.addWidget(self.btn_update)
+        action_row.addWidget(self.btn_split)
+        action_row.addWidget(self.btn_rollback)
         left_layout.addLayout(action_row)
 
         # Export by time
@@ -396,6 +403,19 @@ class TeleArchiveWindow(QtWidgets.QMainWindow):
             self._log("用户取消导入。")
             return
 
+        # Backup before ingest so we can rollback reliably.
+        backup_path: Path | None = None
+        if db_path.is_file():
+            try:
+                backup_path = create_db_backup(db_path)
+                self._log(f"已创建导入前备份: {backup_path}")
+            except Exception as exc:  # noqa: BLE001
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "提示",
+                    f"无法创建导入前备份（将继续导入，但无法一键回滚）:\n{exc}",
+                )
+
         def worker() -> None:
             try:
                 with Database(db_path) as db:
@@ -424,6 +444,13 @@ class TeleArchiveWindow(QtWidgets.QMainWindow):
                 QtCore.Qt.QueuedConnection,
                 QtCore.Q_ARG(str, "\n".join(lines)),
             )
+            if backup_path:
+                QtCore.QMetaObject.invokeMethod(
+                    self,
+                    "_append_log",
+                    QtCore.Qt.QueuedConnection,
+                    QtCore.Q_ARG(str, f"可回滚备份: {backup_path}"),
+                )
             QtCore.QMetaObject.invokeMethod(
                 self,
                 "_refresh_board_after_ingest",
@@ -446,6 +473,58 @@ class TeleArchiveWindow(QtWidgets.QMainWindow):
     @QtCore.Slot(str)
     def _show_info(self, text: str) -> None:
         QtWidgets.QMessageBox.information(self, "导出完成", text)
+
+    def _split_db(self) -> None:
+        db_path = Path(self.db_edit.text()).resolve()
+        if not db_path.is_file():
+            QtWidgets.QMessageBox.warning(self, "提示", "数据库不存在，请先导入聊天记录。")
+            return
+        out_dir = QtWidgets.QFileDialog.getExistingDirectory(
+            self, "选择拆分输出目录", str(db_path.parent)
+        )
+        if not out_dir:
+            return
+        try:
+            results = split_db_by_chat(db_path, Path(out_dir))
+        except Exception as exc:  # noqa: BLE001
+            QtWidgets.QMessageBox.critical(self, "错误", f"拆分失败: {exc}")
+            return
+        lines = ["=== 拆分完成 ==="]
+        for r in results:
+            lines.append(f"{r.chat_name} ({r.chat_id}) -> {r.output_db} | {r.message_count} 条")
+        self._log("\n".join(lines))
+        QtWidgets.QMessageBox.information(self, "拆分完成", "\n".join(lines[:40]))
+
+    def _rollback_db(self) -> None:
+        db_path = Path(self.db_edit.text()).resolve()
+        if not db_path.exists():
+            QtWidgets.QMessageBox.warning(self, "提示", "数据库不存在。")
+            return
+        backup, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            "选择要回滚的备份数据库",
+            str(db_path.parent),
+            "SQLite (*.db);;All Files (*.*)",
+        )
+        if not backup:
+            return
+        if (
+            QtWidgets.QMessageBox.question(
+                self,
+                "确认回滚",
+                f"将使用备份覆盖当前数据库：\n\n当前: {db_path}\n备份: {backup}\n\n此操作会丢失回滚点之后的所有导入结果。",
+            )
+            != QtWidgets.QMessageBox.Yes
+        ):
+            return
+        try:
+            rollback_db_from_backup(db_path, Path(backup))
+        except Exception as exc:  # noqa: BLE001
+            QtWidgets.QMessageBox.critical(self, "错误", f"回滚失败: {exc}")
+            return
+        self._log(f"已回滚数据库: {db_path}\n来源备份: {backup}")
+        # Refresh board if already loaded
+        self._render_board()
 
     def _browse_export_dir(self) -> None:
         base = Path(self.export_out.text().strip() or str(default_export_slice_dir())).resolve()

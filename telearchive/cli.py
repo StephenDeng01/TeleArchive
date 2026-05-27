@@ -13,6 +13,7 @@ from rich.table import Table
 from telearchive import __version__
 from telearchive.coverage import export_coverage, find_id_gaps
 from telearchive.db import Database
+from telearchive.db_tools import create_db_backup, rollback_db_from_backup, split_db_by_chat
 from telearchive.export_chat import export_chat_range
 from telearchive.merge import ingest_paths
 from telearchive.updater import check_for_update, dismiss_update_reminder
@@ -175,9 +176,17 @@ def ingest(
         "--allow-mixed-chats",
         help="允许导入与当前数据库不同的群聊（不推荐）",
     ),
+    backup_before_ingest: bool = typer.Option(
+        True,
+        "--backup/--no-backup",
+        help="导入前自动创建数据库备份（推荐开启）",
+    ),
 ) -> None:
     """导入并合并聊天记录（按 chat_id + message_id 去重，保留旧导出中已删消息）。"""
     db_path = _resolve_db(db)
+    if backup_before_ingest and db_path.is_file():
+        backup = create_db_backup(db_path)
+        console.print(f"[dim]已创建导入前备份[/dim] → {backup}")
     with Database(db_path) as database:
         try:
             results = ingest_paths(
@@ -235,6 +244,39 @@ def ingest(
                     f"{preserved} 条（群自动删除导致）[/dim]"
                 )
     console.print(f"数据库: [cyan]{db_path.resolve()}[/cyan]")
+
+
+@app.command("split-db")
+def split_db(
+    out_dir: Path = typer.Argument(..., help="拆分输出目录（将生成多个 .db）"),
+    db: Optional[Path] = typer.Option(
+        None, "--db", help="数据库路径，默认 data/telearchive.db"
+    ),
+) -> None:
+    """将混合群聊的数据库按 chat_id 拆分为多个单群数据库。"""
+    db_path = _resolve_db(db)
+    results = split_db_by_chat(db_path, out_dir)
+    table = Table(title="拆分结果")
+    table.add_column("群聊 ID", justify="right")
+    table.add_column("名称")
+    table.add_column("消息数", justify="right")
+    table.add_column("输出 DB")
+    for r in results:
+        table.add_row(str(r.chat_id), r.chat_name, str(r.message_count), str(r.output_db))
+    console.print(table)
+
+
+@app.command("rollback-db")
+def rollback_db(
+    backup_db: Path = typer.Argument(..., help="备份数据库路径（*.db）"),
+    db: Optional[Path] = typer.Option(
+        None, "--db", help="数据库路径，默认 data/telearchive.db"
+    ),
+) -> None:
+    """使用指定备份覆盖当前数据库，实现回滚。"""
+    db_path = _resolve_db(db)
+    rollback_db_from_backup(db_path, backup_db)
+    console.print(f"[green]已回滚[/green] {db_path.resolve()} ← {backup_db.resolve()}")
 
 
 @app.command("status")
