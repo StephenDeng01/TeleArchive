@@ -12,7 +12,9 @@ from PyInstaller.utils.hooks import (
 import telearchive
 
 block_cipher = None
-_tg_assets = Path(telearchive.__file__).resolve().parent / "assets" / "tg_export"
+_assets_dir = Path(telearchive.__file__).resolve().parent / "assets"
+_app_icon = _assets_dir / "logo.ico"
+_tg_assets = _assets_dir / "tg_export"
 
 hiddenimports = (
     collect_submodules("rich")
@@ -93,4 +95,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon=str(_app_icon) if _app_icon.is_file() else None,
 )

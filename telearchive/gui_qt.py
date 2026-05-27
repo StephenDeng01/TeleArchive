@@ -33,6 +33,18 @@ from telearchive.updater import (
 
 _BOUND_DISPLAY_FORMAT = "yyyy-MM-dd HH:mm:ss"
 _BOUND_STORAGE_FORMAT = "yyyy-MM-ddTHH:mm:ss"
+_ASSETS_DIR = Path(__file__).resolve().parent / "assets"
+
+
+def _logo_png_path() -> Path:
+    return _ASSETS_DIR / "logo.png"
+
+
+def _load_app_icon() -> QtGui.QIcon:
+    icon = QtGui.QIcon(str(_logo_png_path()))
+    if icon.isNull():
+        icon = QtGui.QIcon(str(_ASSETS_DIR / "logo.ico"))
+    return icon
 
 
 def _make_datetime_edit(default_text: str) -> QtWidgets.QDateTimeEdit:
@@ -69,6 +81,7 @@ class TeleArchiveWindow(QtWidgets.QMainWindow):
         self.html_cache_dir = default_html_cache_dir().resolve()
         self._board_loaded = False
         self.update_result_ready.connect(self._on_update_result_ready)
+        self.setWindowIcon(_load_app_icon())
 
         self._build_ui()
         QtCore.QTimer.singleShot(800, self._check_update_on_startup)
@@ -96,15 +109,15 @@ class TeleArchiveWindow(QtWidgets.QMainWindow):
         title.setFont(QtGui.QFont("Segoe UI", 18, QtGui.QFont.Bold))
         subtitle = QtWidgets.QLabel("Telegram 群聊归档与合并（Qt 版）")
         subtitle.setFont(QtGui.QFont("Segoe UI", 10))
-        logo_path = Path(__file__).resolve().parent / "assets" / "logo.svg"
+        logo_path = _logo_png_path()
         logo_label = QtWidgets.QLabel()
-        logo_label.setFixedSize(36, 36)
+        logo_label.setFixedSize(40, 40)
         logo_pix = QtGui.QPixmap(str(logo_path))
         if not logo_pix.isNull():
             logo_label.setPixmap(
                 logo_pix.scaled(
-                    36,
-                    36,
+                    40,
+                    40,
                     QtCore.Qt.KeepAspectRatio,
                     QtCore.Qt.SmoothTransformation,
                 )
@@ -644,6 +657,7 @@ class TeleArchiveWindow(QtWidgets.QMainWindow):
 def launch_qt_gui() -> None:
     QtCore.QCoreApplication.setAttribute(QtCore.Qt.AA_ShareOpenGLContexts)
     app = QtWidgets.QApplication(sys.argv)
+    app.setWindowIcon(_load_app_icon())
     window = TeleArchiveWindow()
     window.show()
     sys.exit(app.exec())
