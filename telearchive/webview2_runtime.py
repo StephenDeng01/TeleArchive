@@ -25,7 +25,69 @@ def app_install_dir() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
+_RUNTIME_RESOLVED = False
+_RUNTIME_PATH: Path | None = None
+
+
+def resolve_portable_runtime_dir() -> Path | None:
+    """
+    Find a folder containing ``msedgewebview2.exe`` beside the app or cwd.
+
+    Supports the official zip layout (``WebView2Runtime/`` next to the exe)
+    and shallow mis-nesting (e.g. user only moved the exe).
+    """
+    global _RUNTIME_RESOLVED, _RUNTIME_PATH
+    if _RUNTIME_RESOLVED:
+        return _RUNTIME_PATH
+
+    roots: list[Path] = []
+    exe_parent = app_install_dir()
+    roots.append(exe_parent)
+    # Same folder as argv[0] when frozen (e.g. shortcut oddities)
+    try:
+        argv0 = Path(sys.argv[0]).resolve()
+        if argv0.is_file():
+            roots.append(argv0.parent)
+    except OSError:
+        pass
+    try:
+        roots.append(Path.cwd().resolve())
+    except OSError:
+        pass
+
+    seen: set[Path] = set()
+    candidates: list[Path] = []
+    for root in roots:
+        root = root.resolve()
+        if root in seen:
+            continue
+        seen.add(root)
+        for name in ("WebView2Runtime", "WebView2", "webview2runtime"):
+            candidates.append(root / name)
+        if root.is_dir():
+            for child in root.iterdir():
+                if child.is_dir():
+                    candidates.append(child)
+
+    found: Path | None = None
+    for folder in candidates:
+        try:
+            exe = folder / "msedgewebview2.exe"
+        except OSError:
+            continue
+        if exe.is_file():
+            found = folder.resolve()
+            break
+
+    _RUNTIME_RESOLVED = True
+    _RUNTIME_PATH = found
+    return found
+
+
 def portable_runtime_dir() -> Path:
+    resolved = resolve_portable_runtime_dir()
+    if resolved is not None:
+        return resolved
     return app_install_dir() / "WebView2Runtime"
 
 
@@ -34,8 +96,9 @@ def portable_user_data_dir() -> Path:
 
 
 def is_runtime_ready(runtime_dir: Path | None = None) -> bool:
-    folder = runtime_dir or portable_runtime_dir()
-    return (folder / "msedgewebview2.exe").is_file()
+    if runtime_dir is not None:
+        return (runtime_dir / "msedgewebview2.exe").is_file()
+    return resolve_portable_runtime_dir() is not None
 
 
 def configure_portable_webview2() -> bool:
@@ -46,8 +109,8 @@ def configure_portable_webview2() -> bool:
   """
     if sys.platform != "win32":
         return False
-    runtime = portable_runtime_dir()
-    if not is_runtime_ready(runtime):
+    runtime = resolve_portable_runtime_dir()
+    if runtime is None or not (runtime / "msedgewebview2.exe").is_file():
         return False
     data_dir = portable_user_data_dir()
     data_dir.mkdir(parents=True, exist_ok=True)
@@ -59,14 +122,20 @@ def configure_portable_webview2() -> bool:
 def runtime_status_message() -> str:
     if sys.platform != "win32":
         return "仅 Windows 支持内嵌 WebView2。"
-    runtime = portable_runtime_dir()
-    if is_runtime_ready(runtime):
+    runtime = resolve_portable_runtime_dir()
+    if runtime is not None:
         return f"便携 WebView2 已就绪: {runtime}"
     return (
-        f"未找到便携 WebView2（{runtime}）。\n"
+        f"未找到便携 WebView2（期望目录: {app_install_dir() / 'WebView2Runtime'}）。\n"
         "请使用完整安装包（含 WebView2Runtime 文件夹），"
         "或在应用内执行「安装便携 WebView2」。"
     )
+
+
+def invalidate_runtime_cache() -> None:
+    global _RUNTIME_RESOLVED, _RUNTIME_PATH
+    _RUNTIME_RESOLVED = False
+    _RUNTIME_PATH = None
 
 
 def bootstrap_portable_runtime(
@@ -122,6 +191,7 @@ def bootstrap_portable_runtime(
     )
 
     shutil.rmtree(staging, ignore_errors=True)
+    invalidate_runtime_cache()
     configure_portable_webview2()
     log(f"便携 WebView2 已安装到: {target}")
     return target

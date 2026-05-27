@@ -46,6 +46,10 @@ DEFAULT_DB = default_db_path()
 
 def launch_gui() -> None:
     """Open the desktop window. Blocks until the user closes it."""
+    if sys.platform == "win32":
+        from telearchive.webview2_runtime import configure_portable_webview2
+
+        configure_portable_webview2()
     app = TeleArchiveApp()
     app.mainloop()
 
@@ -68,6 +72,10 @@ class TeleArchiveApp(tk.Tk):
         self._build_ui()
         self._log("欢迎使用 TeleArchive。请选择 Telegram 导出文件夹，然后点击「导入合并」。")
         self._log("提示：每次导出的完整文件夹（含 result.json 与 photos/ 等）均可添加。")
+        if sys.platform == "win32":
+            from telearchive.webview2_runtime import runtime_status_message
+
+            self._log(runtime_status_message())
         self.after(800, self._check_update_on_startup)
 
     def _build_ui(self) -> None:

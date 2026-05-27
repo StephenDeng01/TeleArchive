@@ -1,6 +1,6 @@
 [project]
 name = "telearchive"
-version = "0.7.3"
+version = "0.7.4"
 description = "合并 Telegram Desktop 手动导出的群聊记录，去重入库供分析"
 readme = "README.md"
 requires-python = ">=3.9"
