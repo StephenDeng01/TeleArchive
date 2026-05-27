@@ -326,9 +326,10 @@ df = pd.read_sql("SELECT * FROM messages WHERE chat_id = ?", conn, params=(chat_
 
 **右栏 — 聊天看板**
 
-- 使用 **Qt WebEngine** 内嵌渲染 Telegram 风格 HTML，支持图片、贴纸、emoji、视频缩略图
+- 从数据库按时间范围生成 **Telegram Desktop 原生 HTML 导出文件夹**（`messages.html` + `css/` + `js/` + `images/` + 媒体子目录），再在 Qt WebEngine 中渲染
 - 填写时间范围，或点击 **今天 / 近三天 / 近一周 / 近一月 / 全部消息** 快捷按钮
-- 点击 **「刷新预览」** 生成并加载看板，结果缓存于本地
+- 点击 **「刷新预览」** 从数据库重新生成并加载；导入新数据后若看板已打开会自动刷新
+- 缓存文件夹在关闭应用时清除，每次刷新也会重建，确保内容与数据库一致
 
 > ⏱️ **时间格式**：`YYYY-MM-DD` 或 `YYYY-MM-DDTHH:MM:SS`，均为 **UTC+8**
 

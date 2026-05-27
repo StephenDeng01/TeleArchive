@@ -26,13 +26,16 @@ def test_initials() -> None:
     assert _initials("周小琪") == "周小"
 
 
-def test_render_native_html_inlines_css(tmp_path: Path) -> None:
+def test_render_native_html_uses_tg_assets(tmp_path: Path) -> None:
     css_dir = tmp_path / "css"
     css_dir.mkdir()
     (css_dir / "style.css").write_text(".userpic { color: red; }", encoding="utf-8")
+    js_dir = tmp_path / "js"
+    js_dir.mkdir()
+    (js_dir / "script.js").write_text("", encoding="utf-8")
     out = _render_native_html("Test", [], {}, tmp_path)
-    assert "<style>" in out
-    assert ".userpic { color: red; }" in out
+    assert 'href="css/style.css"' in out
+    assert 'src="js/script.js"' in out
     assert BOARD_RENDER_VERSION.startswith("r")
 
 

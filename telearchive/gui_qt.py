@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import sys
 import threading
-import time
 import webbrowser
 from datetime import datetime
 from pathlib import Path
 
 from PySide6 import QtCore, QtGui, QtWidgets
+from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile
 from PySide6.QtWebEngineWidgets import QWebEngineView
 
 from telearchive import __version__
@@ -208,6 +208,9 @@ class TeleArchiveWindow(QtWidgets.QMainWindow):
         board_layout.addWidget(self.board_status)
 
         self.web = QWebEngineView()
+        board_profile = QWebEngineProfile("TeleArchiveBoard", self.web)
+        board_profile.setHttpCacheType(QWebEngineProfile.HttpCacheType.NoCache)
+        self.web.setPage(QWebEnginePage(board_profile, self.web))
         board_layout.addWidget(self.web, 1)
 
         right_layout.addWidget(board_box, 1)
@@ -478,10 +481,8 @@ class TeleArchiveWindow(QtWidgets.QMainWindow):
         self.board_status.setText(
             f"{chat_name} | {count} 条 | {self.board_from.text()} ~ {self.board_to.text()}"
         )
-        url = QtCore.QUrl.fromLocalFile(str(path))
-        url.setQuery(f"t={int(time.time() * 1000)}")
-        self.web.load(url)
-        self._log(f"看板已加载: {path}")
+        self.web.load(QtCore.QUrl.fromLocalFile(str(path)))
+        self._log(f"看板已加载: {path}（TG 导出 HTML 文件夹）")
 
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:
         clear_board_cache(self.html_cache_dir)

@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from telearchive.db import Database
+from telearchive.export_chat import export_chat_range
 from telearchive.export_dates import ALL_FROM, ALL_TO, UTC8, parse_bound
 from telearchive.media import (
     extract_media_refs,
@@ -21,7 +22,7 @@ from telearchive.media import (
 from telearchive.parser import extract_text
 
 # Bump when HTML/CSS rendering changes so stale html_cache bundles are rebuilt.
-BOARD_RENDER_VERSION = "r4"
+BOARD_RENDER_VERSION = "r5"
 _MONTHS = (
     "January",
     "February",
@@ -88,9 +89,15 @@ def render_range_to_cache(
     bundle_dir = chat_dir / key
     json_path = bundle_dir / "board_meta.json"
     html_path = bundle_dir / "messages.html"
+    result_json_path = bundle_dir / "result.json"
     if force_refresh and bundle_dir.exists():
         shutil.rmtree(bundle_dir, ignore_errors=True)
-    if html_path.is_file() and json_path.is_file() and not force_refresh:
+    if (
+        html_path.is_file()
+        and json_path.is_file()
+        and result_json_path.is_file()
+        and not force_refresh
+    ):
         count = _load_count(json_path)
         return BoardRenderResult(
             chat_id=chat_id,
@@ -103,41 +110,39 @@ def render_range_to_cache(
             cached=True,
         )
 
-    rows = db.fetch_messages_in_range(chat_id, from_ts, to_ts)
-    if not rows:
-        raise ValueError("该时间范围内没有消息")
-    messages: list[dict[str, Any]] = []
-    for row in rows:
-        try:
-            msg = json.loads(row["raw_json"])
-        except json.JSONDecodeError:
-            continue
-        if isinstance(msg, dict):
-            messages.append(msg)
-    if not messages:
-        raise ValueError("该时间范围内没有可渲染消息")
-
     if bundle_dir.exists():
         shutil.rmtree(bundle_dir, ignore_errors=True)
     bundle_dir.mkdir(parents=True, exist_ok=True)
-    _install_tg_assets(bundle_dir)
 
-    message_ids = [int(m["id"]) for m in messages if m.get("id") is not None]
-    media_map = db.fetch_media_sources(chat_id, message_ids)
-    _copy_media_files(bundle_dir, messages, media_map)
+    export_result = export_chat_range(
+        db,
+        bundle_dir,
+        chat_id,
+        from_bound=from_text,
+        to_bound=to_text,
+        include_media=True,
+    )
+    export_doc = json.loads(result_json_path.read_text(encoding="utf-8"))
+    messages = export_doc.get("messages") or []
+    if not isinstance(messages, list) or not messages:
+        raise ValueError("该时间范围内没有可渲染消息")
+
+    _install_tg_assets(bundle_dir)
+    media_map = _ensure_bundle_media(bundle_dir, db, chat_id, messages)
 
     html_path.write_text(
-        _render_native_html(chat_name, messages, media_map, bundle_dir),
+        _render_native_html(export_result.chat_name, messages, media_map, bundle_dir),
         encoding="utf-8",
     )
     json_path.write_text(
         json.dumps(
             {
                 "chat_id": chat_id,
-                "chat_name": chat_name,
+                "chat_name": export_result.chat_name,
                 "from_ts": from_ts,
                 "to_ts": to_ts,
-                "message_count": len(messages),
+                "message_count": export_result.message_count,
+                "export_dir": str(bundle_dir),
             },
             ensure_ascii=False,
             indent=1,
@@ -146,10 +151,10 @@ def render_range_to_cache(
     )
     return BoardRenderResult(
         chat_id=chat_id,
-        chat_name=chat_name,
+        chat_name=export_result.chat_name,
         from_ts=from_ts,
         to_ts=to_ts,
-        message_count=len(messages),
+        message_count=export_result.message_count,
         html_path=html_path,
         json_path=json_path,
         cached=False,
@@ -173,6 +178,33 @@ def _install_tg_assets(bundle_dir: Path) -> None:
             shutil.rmtree(dest)
         if (src / sub).is_dir():
             shutil.copytree(src / sub, dest)
+
+
+def _ensure_bundle_media(
+    bundle_dir: Path,
+    db: Database,
+    chat_id: int,
+    messages: list[dict[str, Any]],
+) -> dict[tuple[int, str], str]:
+    """Ensure TG export media/thumbs exist in the bundle and return local paths."""
+    message_ids = [int(m["id"]) for m in messages if m.get("id") is not None]
+    source_map = db.fetch_media_sources(chat_id, message_ids)
+    _copy_media_files(bundle_dir, messages, source_map)
+
+    media_map: dict[tuple[int, str], str] = {}
+    for msg in messages:
+        mid = msg.get("id")
+        if mid is None:
+            continue
+        for _kind, rel in extract_media_refs(msg):
+            dest = bundle_dir / rel
+            if dest.is_file():
+                media_map[(int(mid), rel)] = str(dest)
+                continue
+            src = source_map.get((int(mid), rel))
+            if src and Path(src).is_file():
+                media_map[(int(mid), rel)] = src
+    return media_map
 
 
 def _copy_media_files(
